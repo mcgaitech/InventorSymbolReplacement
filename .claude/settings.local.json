@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dotnet build:*)",
+      "Bash(Get-ChildItem \"C:\\\\Program Files\\\\Autodesk\" -Recurse -Filter \"Autodesk.Inventor.Interop.dll\")",
+      "Bash(Select-Object FullName)",
+      "Read(//c/Program Files/Autodesk/**)",
+      "Bash(powershell -Command \"Add-Type -Path 'C:/Program Files/Autodesk/Inventor 2023/Bin/Public Assemblies/Autodesk.Inventor.Interop.dll'; [Inventor.DockableWindow].GetEvents\\(\\) | Select-Object Name\")",
+      "Bash(powershell.exe -Command \"Add-Type -Path 'C:/Program Files/Autodesk/Inventor 2023/Bin/Public Assemblies/Autodesk.Inventor.Interop.dll'; [Inventor.DockableWindow].GetEvents\\(\\) | Select-Object Name\")",
+      "Bash(cmd.exe /c \"powershell -Command \\\\\"Add-Type -Path 'C:\\\\\\\\Program Files\\\\\\\\Autodesk\\\\\\\\Inventor 2023\\\\\\\\Bin\\\\\\\\Public Assemblies\\\\\\\\Autodesk.Inventor.Interop.dll'; [Inventor.DockableWindow].GetEvents\\(\\) | Select-Object Name\\\\\"\")",
+      "Bash(cmd.exe /c \"powershell -Command \\\\\"Add-Type -Path 'C:\\\\\\\\Program Files\\\\\\\\Autodesk\\\\\\\\Inventor 2023\\\\\\\\Bin\\\\\\\\Public Assemblies\\\\\\\\Autodesk.Inventor.Interop.dll'; [Inventor.ButtonStyleEnum].GetEnumNames\\(\\)\\\\\"\")",
+      "Bash(dotnet run:*)",
+      "Bash(cmd.exe /c \"rd /s /q \\\\\"e:\\\\Programming\\\\InventorSymbolReplacement\\\\probe\\\\\"\")"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\TRANTH\\AppData\\Local\\Temp\\probe4"
+    ]
+  }
+}
