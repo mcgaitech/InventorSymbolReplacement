@@ -46,8 +46,10 @@ namespace SymbolReplacer.Controllers
             _paletteCtrl     = paletteCtrl     ?? throw new ArgumentNullException(nameof(paletteCtrl));
 
             // Đăng ký event từ InteractionController
-            _interactionCtrl.SymbolPicked    += OnSymbolPicked;
+            _interactionCtrl.SymbolPicked      += OnSymbolPicked;
             _interactionCtrl.PickModeCancelled += OnPickModeCancelled;
+            _interactionCtrl.InsertPointPicked += OnInsertPointPicked;
+            _interactionCtrl.InsertModeCancelled += OnInsertModeCancelled;
 
             Debug.WriteLine($"{LOG_PREFIX} Khởi tạo ReplaceController.");
         }
@@ -62,9 +64,10 @@ namespace SymbolReplacer.Controllers
 
             if (_panel != null)
             {
-                _panel.ReplaceRequested              += OnReplaceRequested;
+                _panel.ReplaceRequested                += OnReplaceRequested;
                 _panel.ReplaceAllCurrentSheetRequested += OnReplaceAllCurrentSheetRequested;
                 _panel.ReplaceAllAllSheetsRequested    += OnReplaceAllAllSheetsRequested;
+                _panel.InsertRequested                 += OnInsertRequested;
                 Debug.WriteLine($"{LOG_PREFIX} Đã attach panel.");
             }
         }
@@ -73,8 +76,10 @@ namespace SymbolReplacer.Controllers
         public void Cleanup()
         {
             Debug.WriteLine($"{LOG_PREFIX} Cleanup.");
-            _interactionCtrl.SymbolPicked     -= OnSymbolPicked;
-            _interactionCtrl.PickModeCancelled -= OnPickModeCancelled;
+            _interactionCtrl.SymbolPicked        -= OnSymbolPicked;
+            _interactionCtrl.PickModeCancelled   -= OnPickModeCancelled;
+            _interactionCtrl.InsertPointPicked   -= OnInsertPointPicked;
+            _interactionCtrl.InsertModeCancelled -= OnInsertModeCancelled;
             _interactionCtrl.Cleanup();
             DetachPanel();
         }
@@ -106,63 +111,44 @@ namespace SymbolReplacer.Controllers
         {
             Debug.WriteLine($"{LOG_PREFIX} Replace All — Current Sheet.");
 
-            var newDef = _paletteCtrl.SelectedSymbol?.Definition;
-            if (newDef == null)
+            if (_paletteCtrl.SelectedSymbol == null)
             {
                 _panel?.SetStatusError("Please select a new symbol first.");
                 return;
             }
 
-            var doc = GetActiveDrawingDoc();
-            if (doc == null) return;
-
-            var sheet = doc.ActiveSheet;
-            if (sheet == null)
+            if (!IsDrawingDocumentActive())
             {
-                _panel?.SetStatusError("No active sheet.");
+                _panel?.SetStatusError("No active Drawing document.");
                 return;
             }
 
-            // Xác định old definition: tìm symbol cùng tên trong document hiện tại
-            // Nếu không có → hỏi user pick (ESC = cancel)
-            var oldDef = FindMatchingDefinitionInDoc(doc, newDef.Name);
-            if (oldDef == null)
-            {
-                // Không tìm được definition cùng tên → cần user pick một instance
-                _panel?.SetStatusPickMode();
-                // Lưu tạm context để biết đây là Replace All Sheet sau khi pick
-                _pendingReplaceAllMode = ReplaceAllMode.CurrentSheet;
-                _interactionCtrl.EnterPickMode();
-                return;
-            }
-
-            ExecuteReplaceAllSheet(sheet, doc, oldDef, newDef);
+            // Luôn vào pick mode: user chỉ định old symbol bằng cách click trực tiếp
+            _pendingReplaceAllMode = ReplaceAllMode.CurrentSheet;
+            _panel?.SetStatusPickMode();
+            _interactionCtrl.EnterPickMode();
         }
 
         private void OnReplaceAllAllSheetsRequested(object sender, EventArgs e)
         {
             Debug.WriteLine($"{LOG_PREFIX} Replace All — All Sheets.");
 
-            var newDef = _paletteCtrl.SelectedSymbol?.Definition;
-            if (newDef == null)
+            if (_paletteCtrl.SelectedSymbol == null)
             {
                 _panel?.SetStatusError("Please select a new symbol first.");
                 return;
             }
 
-            var doc = GetActiveDrawingDoc();
-            if (doc == null) return;
-
-            var oldDef = FindMatchingDefinitionInDoc(doc, newDef.Name);
-            if (oldDef == null)
+            if (!IsDrawingDocumentActive())
             {
-                _panel?.SetStatusPickMode();
-                _pendingReplaceAllMode = ReplaceAllMode.AllSheets;
-                _interactionCtrl.EnterPickMode();
+                _panel?.SetStatusError("No active Drawing document.");
                 return;
             }
 
-            ExecuteReplaceAllDoc(doc, oldDef, newDef);
+            // Luôn vào pick mode: user chỉ định old symbol bằng cách click trực tiếp
+            _pendingReplaceAllMode = ReplaceAllMode.AllSheets;
+            _panel?.SetStatusPickMode();
+            _interactionCtrl.EnterPickMode();
         }
 
         // ─── Event handlers: InteractionController ────────────────────────────
@@ -223,6 +209,70 @@ namespace SymbolReplacer.Controllers
             _panel?.SetStatusIdle();
         }
 
+        // ─── Event handlers: Insert ───────────────────────────────────────────
+
+        private void OnInsertRequested(object sender, EventArgs e)
+        {
+            Debug.WriteLine($"{LOG_PREFIX} Insert requested.");
+
+            if (_paletteCtrl.SelectedSymbol == null)
+            {
+                _panel?.SetStatusError("Please select a symbol first.");
+                return;
+            }
+
+            if (!IsDrawingDocumentActive())
+            {
+                _panel?.SetStatusError("No active Drawing document.");
+                return;
+            }
+
+            _panel?.SetStatusInsertMode();
+            _interactionCtrl.EnterInsertMode();
+        }
+
+        private void OnInsertPointPicked(object sender, Point2d position)
+        {
+            Debug.WriteLine($"{LOG_PREFIX} Insert point picked: ({position.X:F3}, {position.Y:F3})");
+
+            var newDef = _paletteCtrl.SelectedSymbol?.Definition;
+            if (newDef == null)
+            {
+                _panel?.SetStatusError("Symbol selection lost. Please re-select.");
+                return;
+            }
+
+            var doc = GetActiveDrawingDoc();
+            if (doc == null) return;
+
+            var sheet = doc.ActiveSheet;
+            if (sheet == null)
+            {
+                _panel?.SetStatusError("No active sheet.");
+                return;
+            }
+
+            // Đọc scale và rotation từ Properties panel (người dùng đặt trước khi Insert)
+            double scale    = _panel?.InsertScale       ?? 1.0;
+            double rotation = _panel?.InsertRotationRad ?? 0.0;
+
+            Debug.WriteLine($"{LOG_PREFIX} Insert scale={scale:F3} rotation={rotation:F3}rad");
+
+            var resolvedDef = ResolveDefinitionInDocument(doc, newDef);
+            bool ok = _replaceService.InsertSymbol(sheet, resolvedDef, position, rotation, scale);
+
+            if (ok)
+                _panel?.SetStatusSuccess(1);
+            else
+                _panel?.SetStatusError("Insert failed. Check DebugView for details.");
+        }
+
+        private void OnInsertModeCancelled(object sender, EventArgs e)
+        {
+            Debug.WriteLine($"{LOG_PREFIX} Insert mode cancelled (ESC).");
+            _panel?.SetStatusIdle();
+        }
+
         // ─── Private: Execute replace ─────────────────────────────────────────
 
         private void ExecuteReplaceAllSheet(
@@ -256,15 +306,36 @@ namespace SymbolReplacer.Controllers
             DrawingDocument doc,
             SketchedSymbolDefinition oldDef, SketchedSymbolDefinition newDef)
         {
-            // Tính tổng số instance trên toàn document để hiện confirm
+            // Đếm số instance trên từng sheet để hiện breakdown trong confirm dialog
+            var sheetCounts = new System.Collections.Generic.List<(string Name, int Count)>();
             int total = 0;
+
             foreach (Sheet s in doc.Sheets)
-                total += CountMatchingOnSheet(s, oldDef);
+            {
+                int n = CountMatchingOnSheet(s, oldDef);
+                if (n > 0)
+                    sheetCounts.Add((s.Name, n));
+                total += n;
+            }
+
+            if (total == 0)
+            {
+                _panel?.SetStatusError($"No instances of '{oldDef.Name}' found in document.");
+                return;
+            }
+
+            // Build message với breakdown per-sheet
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine($"Replace {total} instance(s) of '{oldDef.Name}'");
+            sb.AppendLine($"with '{newDef.Name}' across ALL sheets?");
+            sb.AppendLine();
+            foreach (var (name, count) in sheetCounts)
+                sb.AppendLine($"  {name}: {count} instance(s)");
+            sb.AppendLine();
+            sb.Append("This can be undone with Ctrl+Z.");
 
             var answer = MessageBox.Show(
-                $"Replace {total} instance(s) of '{oldDef.Name}'\n" +
-                $"with '{newDef.Name}' across ALL sheets?\n\n" +
-                "This can be undone with Ctrl+Z.",
+                sb.ToString(),
                 "Replace All — All Sheets",
                 MessageBoxButtons.OKCancel,
                 MessageBoxIcon.Question);
@@ -275,9 +346,9 @@ namespace SymbolReplacer.Controllers
                 return;
             }
 
-            int count = _replaceService.ReplaceAllInDocument(doc, oldDef, newDef);
-            if (count > 0)
-                _panel?.SetStatusSuccess(count);
+            int replaced = _replaceService.ReplaceAllInDocument(doc, oldDef, newDef);
+            if (replaced > 0)
+                _panel?.SetStatusSuccess(replaced);
             else
                 _panel?.SetStatusError("No symbols replaced. Check DebugView.");
         }
@@ -293,28 +364,6 @@ namespace SymbolReplacer.Controllers
             if (doc == null)
                 _panel?.SetStatusError("No active Drawing document.");
             return doc;
-        }
-
-        /// <summary>
-        /// Tìm SketchedSymbolDefinition trong document hiện tại có tên match với newDef.
-        /// Dùng khi Replace All mà không cần user pick instance.
-        /// </summary>
-        private SketchedSymbolDefinition FindMatchingDefinitionInDoc(
-            DrawingDocument doc, string defName)
-        {
-            try
-            {
-                foreach (SketchedSymbolDefinition def in doc.SketchedSymbolDefinitions)
-                {
-                    if (string.Equals(def.Name, defName, StringComparison.OrdinalIgnoreCase))
-                        return def;
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"{LOG_PREFIX} LỖI FindMatchingDefinition: {ex.Message}");
-            }
-            return null;
         }
 
         private static int CountMatchingOnSheet(Sheet sheet, SketchedSymbolDefinition targetDef)
@@ -340,10 +389,29 @@ namespace SymbolReplacer.Controllers
         private void DetachPanel()
         {
             if (_panel == null) return;
-            _panel.ReplaceRequested              -= OnReplaceRequested;
+            _panel.ReplaceRequested                -= OnReplaceRequested;
             _panel.ReplaceAllCurrentSheetRequested -= OnReplaceAllCurrentSheetRequested;
             _panel.ReplaceAllAllSheetsRequested    -= OnReplaceAllAllSheetsRequested;
+            _panel.InsertRequested                 -= OnInsertRequested;
             _panel = null;
+        }
+
+        /// <summary>
+        /// Tìm definition cùng tên trong active document.
+        /// Tránh cross-document reference gây E_INVALIDARG.
+        /// </summary>
+        private static SketchedSymbolDefinition ResolveDefinitionInDocument(
+            DrawingDocument doc, SketchedSymbolDefinition libraryDef)
+        {
+            if (doc == null) return libraryDef;
+            try
+            {
+                foreach (SketchedSymbolDefinition def in doc.SketchedSymbolDefinitions)
+                    if (string.Equals(def.Name, libraryDef.Name, StringComparison.OrdinalIgnoreCase))
+                        return def;
+            }
+            catch { }
+            return libraryDef;
         }
 
         // ─── Nested enum ──────────────────────────────────────────────────────

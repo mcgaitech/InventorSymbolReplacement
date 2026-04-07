@@ -21,6 +21,12 @@ namespace SymbolReplacer.Models
         /// <summary>Reference đến Inventor object — dùng cho replace operation</summary>
         public SketchedSymbolDefinition Definition { get; set; }
 
+        /// <summary>Đường dẫn file .idw nguồn chứa definition này.</summary>
+        public string SourceFile { get; set; }
+
+        /// <summary>Số lượng TextBox prompt fields trong definition.</summary>
+        public int PromptCount { get; set; }
+
         // ─── IDisposable ──────────────────────────────────────────────────────
 
         private bool _disposed;

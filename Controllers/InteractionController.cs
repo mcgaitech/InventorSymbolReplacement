@@ -22,7 +22,9 @@ namespace SymbolReplacer.Controllers
         private readonly Inventor.Application _app;
         private InteractionEvents             _interactionEvents;
         private SelectEvents                  _selectEvents;
+        private MouseEvents                   _mouseEvents;   // phải là field, không phải local — tránh GC
         private bool                          _isActive;
+        private bool                          _isInsertMode;
 
         // ─── Events ───────────────────────────────────────────────────────────
 
@@ -31,6 +33,12 @@ namespace SymbolReplacer.Controllers
 
         /// <summary>Raised khi pick mode kết thúc (picked hoặc ESC).</summary>
         public event EventHandler PickModeCancelled;
+
+        /// <summary>Raised khi user click điểm trên bản vẽ trong insert mode.</summary>
+        public event EventHandler<Point2d> InsertPointPicked;
+
+        /// <summary>Raised khi insert mode kết thúc do ESC.</summary>
+        public event EventHandler InsertModeCancelled;
 
         // ─── Properties ───────────────────────────────────────────────────────
         public bool IsActive => _isActive;
@@ -82,6 +90,41 @@ namespace SymbolReplacer.Controllers
             catch (Exception ex)
             {
                 Debug.WriteLine($"{LOG_PREFIX} LỖI EnterPickMode: {ex.Message}");
+                StopInteraction();
+            }
+        }
+
+        /// <summary>
+        /// Bắt đầu insert mode — chờ user click điểm trên bản vẽ để đặt symbol.
+        /// Dùng PointEvents thay vì SelectEvents.
+        /// </summary>
+        public void EnterInsertMode()
+        {
+            Debug.WriteLine($"{LOG_PREFIX} EnterInsertMode.");
+
+            if (_isActive) StopInteraction();
+
+            try
+            {
+                _interactionEvents = _app.CommandManager.CreateInteractionEvents();
+                _interactionEvents.StatusBarText = "Click to place symbol — press ESC to cancel";
+                _interactionEvents.OnTerminate   += OnInteractionTerminate;
+
+                // Dùng MouseEvents.OnMouseClick để nhận tọa độ click trên bản vẽ
+                // QUAN TRỌNG: lưu vào field _mouseEvents (không dùng local var) để tránh COM GC
+                _mouseEvents = _interactionEvents.MouseEvents;
+                _mouseEvents.MouseMoveEnabled = false;
+                _mouseEvents.OnMouseClick += OnInsertMouseClick;
+
+                _interactionEvents.Start();
+                _isActive = true;
+                _isInsertMode = true;
+
+                Debug.WriteLine($"{LOG_PREFIX} Insert mode ACTIVE.");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"{LOG_PREFIX} LỖI EnterInsertMode: {ex.Message}");
                 StopInteraction();
             }
         }
@@ -146,16 +189,50 @@ namespace SymbolReplacer.Controllers
             SymbolPicked?.Invoke(this, picked);
         }
 
+        private void OnInsertMouseClick(
+            MouseButtonEnum button,
+            ShiftStateEnum shiftKeys,
+            Point modelPosition,
+            Point2d viewPosition,
+            View view)
+        {
+            // Chỉ xử lý left-click
+            if (button != MouseButtonEnum.kLeftMouseButton) return;
+
+            Debug.WriteLine($"{LOG_PREFIX} OnInsertMouseClick: ({modelPosition.X:F3}, {modelPosition.Y:F3})");
+
+            // modelPosition là Point 3D nhưng trong Drawing thì Z=0, X/Y là sheet coords
+            Point2d pos2d;
+            try
+            {
+                pos2d = _app.TransientGeometry.CreatePoint2d(modelPosition.X, modelPosition.Y);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"{LOG_PREFIX} LỖI tạo Point2d: {ex.Message}");
+                return;
+            }
+
+            StopInteraction();      // kết thúc mode trước khi raise event
+            InsertPointPicked?.Invoke(this, pos2d);
+        }
+
         private void OnInteractionTerminate()
         {
             // User nhấn ESC hoặc Inventor kết thúc interaction
             Debug.WriteLine($"{LOG_PREFIX} OnInteractionTerminate (ESC hoặc API stop).");
 
-            bool wasActive = _isActive;
+            bool wasActive    = _isActive;
+            bool wasInsert    = _isInsertMode;
             StopInteraction();
 
             if (wasActive)
-                PickModeCancelled?.Invoke(this, EventArgs.Empty);
+            {
+                if (wasInsert)
+                    InsertModeCancelled?.Invoke(this, EventArgs.Empty);
+                else
+                    PickModeCancelled?.Invoke(this, EventArgs.Empty);
+            }
         }
 
         // ─── Private: Cleanup interaction ─────────────────────────────────────
@@ -181,10 +258,24 @@ namespace SymbolReplacer.Controllers
 
             try
             {
+                if (_mouseEvents != null)
+                {
+                    _mouseEvents.OnMouseClick -= OnInsertMouseClick;
+                    _mouseEvents = null;
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"{LOG_PREFIX} LỖI detach MouseEvents: {ex.Message}");
+            }
+
+            try
+            {
                 if (_interactionEvents != null)
                 {
                     _interactionEvents.OnTerminate -= OnInteractionTerminate;
-                    _interactionEvents.Stop();
+                    // Bọc Stop() trong try riêng — có thể throw khi Inventor đang shutdown
+                    try { _interactionEvents.Stop(); } catch { }
                     _interactionEvents = null;
                 }
             }
@@ -193,7 +284,8 @@ namespace SymbolReplacer.Controllers
                 Debug.WriteLine($"{LOG_PREFIX} LỖI stop InteractionEvents: {ex.Message}");
             }
 
-            _isActive = false;
+            _isActive     = false;
+            _isInsertMode = false;
         }
     }
 }

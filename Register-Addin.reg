@@ -1,0 +1,25 @@
+Windows Registry Editor Version 5.00
+
+; SymbolReplacer Inventor AddIn — COM Registration (per-user, no admin needed)
+; Run this file ONCE after first build: double-click Register-Addin.reg
+; Re-run whenever the DLL path changes.
+
+; HKCU\Software\Classes is the per-user COM class store — no admin required.
+; Inventor scans both HKCU and HKLM when resolving CLSIDs.
+
+[HKEY_CURRENT_USER\Software\Classes\CLSID\{7C3D8E4F-2A1B-4C5D-9E8F-1A2B3C4D5E6F}]
+@="SymbolReplacer.SymbolReplacerAddin"
+
+[HKEY_CURRENT_USER\Software\Classes\CLSID\{7C3D8E4F-2A1B-4C5D-9E8F-1A2B3C4D5E6F}\InprocServer32]
+@="mscoree.dll"
+"ThreadingModel"="Both"
+"Class"="SymbolReplacer.SymbolReplacerAddin"
+"Assembly"="SymbolReplacer, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+"RuntimeVersion"="v4.0.30319"
+"CodeBase"="file:///C:/Users/TRANTH/AppData/Roaming/Autodesk/Inventor 2023/Addins/SymbolReplacer.dll"
+
+[HKEY_CURRENT_USER\Software\Classes\CLSID\{7C3D8E4F-2A1B-4C5D-9E8F-1A2B3C4D5E6F}\InprocServer32\1.0.0.0]
+"Class"="SymbolReplacer.SymbolReplacerAddin"
+"Assembly"="SymbolReplacer, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+"RuntimeVersion"="v4.0.30319"
+"CodeBase"="file:///C:/Users/TRANTH/AppData/Roaming/Autodesk/Inventor 2023/Addins/SymbolReplacer.dll"

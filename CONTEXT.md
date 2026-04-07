@@ -1,242 +1,345 @@
-# Symbol Replacer — Project Context for Claude Code
+# CONTEXT.md — SymbolReplacer
 
-## Mục tiêu dự án
-
-AddIn cho Autodesk Inventor 2023 (IDW drawing environment).
-Thay thế (replace) các Sketched Symbol cũ bằng symbol mới, **giữ nguyên**:
-
-- Insert point (Position 2D)
-- Rotation, Scale
-- Layer
-- Attribute values (tên attribute giống nhau giữa symbol cũ và mới)
+# Inventor 2023 AddIn | C# | WPF | VS Code
 
 ---
 
-## Môi trường kỹ thuật
+## Thông tin project
 
-- **Inventor 2023** — API: `Autodesk.Inventor.Interop.dll`
-- **C# / .NET Framework 4.8**, WinForms
-- **IDE**: Visual Studio Code
-- **Build**: `dotnet build -c Debug` (chạy với quyền Administrator)
-- **Output**: COM AddIn `.dll` + `.addin` file
+- **Tên project**: SymbolReplacer
+- **Phần mềm đích**: Inventor 2023
+- **Loại output**: Inventor AddIn (COM .dll + .addin)
+- **GUID**: `{7C3D8E4F-2A1B-4C5D-9E8F-1A2B3C4D5E6F}`
 
 ---
 
-## Kiến trúc: MVC + SOLID
+## Bài toán cần giải quyết
+
+Trong bản vẽ IDW của Inventor, người dùng cần thay thế các Sketched Symbol cũ bằng symbol mới nhưng **giữ nguyên toàn bộ thuộc tính** của symbol cũ.
+
+**Vấn đề hiện tại**: Inventor không có công cụ replace symbol built-in. Người dùng phải xóa thủ công từng symbol cũ và chèn lại symbol mới, dẫn đến mất insert point, rotation, scale và attribute values.
+
+**Đặc điểm symbol**: Symbol mới và cũ có **cùng attribute names** (chỉ khác hình dạng) → copy attribute 1-1, không cần mapping dialog.
+
+**Workflow hiện tại (thủ công)**:
+
+1. Ghi nhớ vị trí, rotation, scale, attribute values của symbol cũ
+2. Xóa symbol cũ
+3. Insert symbol mới tại vị trí cũ
+4. Điền lại toàn bộ attribute values
+5. Lặp lại cho từng symbol → tốn thời gian, dễ nhầm
+
+**Workflow sau khi có tool**:
+
+1. Mở palette Symbol Replacer từ ribbon Custom Tools
+2. Chọn symbol mới từ danh sách thumbnail trong palette
+3. Click "Replace" → click vào symbol cũ trên bản vẽ → replace ngay
+4. Hoặc "Replace All" → chọn phạm vi (Current Sheet / All Sheets) → confirm → done
+
+---
+
+## Kiến trúc thư mục
 
 ```
 SymbolReplacer/
+├── CLAUDE.md
+├── CONTEXT.md
+├── SESSION_LOG.md
 ├── SymbolReplacer.csproj
 ├── SymbolReplacer.addin
 ├── SymbolReplacerAddin.cs          ← Entry point, COM [Guid], ApplicationAddInServer
+│
 ├── Resources/
-│   ├── ReplaceSymbol_32.png
-│   └── ReplaceSymbol_16.png
+│   ├── ReplaceSymbol_32.png        ← Icon ribbon 32x32
+│   └── ReplaceSymbol_16.png        ← Icon ribbon 16x16
+│
 ├── Models/
-│   ├── SymbolDefinitionModel.cs    ← Tên, thumbnail bitmap, definition reference
+│   ├── SymbolDefinitionModel.cs    ← Tên symbol, thumbnail bitmap, definition ref
 │   ├── ReplaceOperationModel.cs    ← Snapshot properties của symbol cũ
-│   └── LibraryConfigModel.cs      ← Library path config
+│   └── LibraryConfigModel.cs      ← Library path, last used path
+│
 ├── Views/
-│   ├── SymbolReplacerPanel.cs      ← DockableWindow UserControl (WinForms)
-│   ├── ThumbnailGridControl.cs     ← Custom control: grid ảnh symbol
-│   └── ConfirmReplaceAllDialog.cs  ← Dialog xác nhận Replace All
+│   ├── SymbolReplacerPanel.xaml    ← WPF UserControl nhúng vào DockableWindow
+│   ├── SymbolReplacerPanel.xaml.cs
+│   ├── ConfirmReplaceAllDialog.xaml
+│   ├── ConfirmReplaceAllDialog.xaml.cs
+│   └── Styles/
+│       └── SharedStyles.xaml       ← ResourceDictionary màu sắc, font chuẩn
+│
+├── ViewModels/
+│   ├── SymbolReplacerViewModel.cs
+│   └── ConfirmReplaceAllViewModel.cs
+│
 ├── Controllers/
-│   ├── RibbonController.cs         ← Ribbon button + DockableWindow management
+│   ├── RibbonController.cs         ← Tạo tab Custom Tools, button, DockableWindow
 │   ├── PaletteController.cs        ← Load symbols, search, selection
 │   ├── ReplaceController.cs        ← Logic replace single + all
 │   └── InteractionController.cs    ← InteractionEvents pick mode
+│
 ├── Services/
-│   ├── ILibraryService.cs / LibraryService.cs         ← Mở .idw library, đọc definitions
-│   ├── IThumbnailService.cs / ThumbnailService.cs     ← GDI+ render thumbnail + cache
-│   ├── ISymbolReplaceService.cs / SymbolReplaceService.cs ← Core replace + Transaction
-│   └── IConfigService.cs / ConfigService.cs           ← Đọc/ghi config.json
+│   ├── ILibraryService.cs
+│   ├── LibraryService.cs           ← Mở .idw library ẩn, đọc definitions
+│   ├── IThumbnailService.cs
+│   ├── ThumbnailService.cs         ← GDI+ render thumbnail + Dictionary cache
+│   ├── ISymbolReplaceService.cs
+│   ├── SymbolReplaceService.cs     ← Core replace logic + TransactionManager
+│   ├── IConfigService.cs
+│   └── ConfigService.cs            ← Đọc/ghi config.json
+│
 └── Helpers/
-    ├── PictureDispConverter.cs     ← Convert Bitmap → stdole.IPictureDisp cho Inventor API
-    ├── CoordinateHelper.cs         ← 2D coordinate transform cho thumbnail render
+    ├── PictureDispConverter.cs     ← Bitmap → stdole.IPictureDisp cho ribbon icon
+    ├── CoordinateHelper.cs         ← 2D coordinate transform cho thumbnail
     └── GdiRenderHelper.cs          ← GDI+ drawing utilities
 ```
 
 ---
 
-## Quy tắc code (bắt buộc tuân theo)
+## Cấu hình kỹ thuật
 
-| Rule               | Chi tiết                                                                     |
-| ------------------ | ---------------------------------------------------------------------------- |
-| **Ngôn ngữ code**  | English (tên class, method, variable, UI text)                               |
-| **Comment & Log**  | Tiếng Việt                                                                   |
-| **Log prefix**     | Mỗi class có `private const string LOG_PREFIX = "[ClassName]"`               |
-| **Log tool**       | `System.Diagnostics.Debug.WriteLine(...)` — xem qua DebugView hoặc VS Output |
-| **Log bắt buộc**   | Đầu/cuối mỗi method quan trọng, mỗi catch block, mọi thay đổi state          |
-| **SOLID**          | Interface cho mọi Service, DI manual trong `SymbolReplacerAddin.Activate()`  |
-| **Error handling** | try/catch với log chi tiết, không swallow exception ở tầng quan trọng        |
+### .csproj
+
+```xml
+<PropertyGroup>
+  <OutputType>Library</OutputType>
+  <TargetFramework>net48</TargetFramework>
+  <UseWPF>true</UseWPF>
+  <PlatformTarget>x64</PlatformTarget>
+  <RegisterForComInterop>true</RegisterForComInterop>
+
+  <!--
+    ĐỔI ĐƯỜNG DẪN NÀY nếu Inventor không cài ở ổ C.
+    Tìm đường dẫn thực tế bằng PowerShell:
+    Get-ChildItem "C:\Program Files\Autodesk" -Recurse
+      -Filter "Autodesk.Inventor.Interop.dll" | Select FullName
+  -->
+  <InventorBinPath>C:\Program Files\Autodesk\Inventor 2023\Bin</InventorBinPath>
+</PropertyGroup>
+
+<ItemGroup>
+  <Reference Include="Autodesk.Inventor.Interop">
+    <HintPath>$(InventorBinPath)\Autodesk.Inventor.Interop.dll</HintPath>
+    <EmbedInteropTypes>False</EmbedInteropTypes>
+    <Private>False</Private>
+  </Reference>
+  <Reference Include="stdole">
+    <HintPath>$(InventorBinPath)\stdole.dll</HintPath>
+    <EmbedInteropTypes>False</EmbedInteropTypes>
+    <Private>False</Private>
+  </Reference>
+</ItemGroup>
+```
 
 ---
 
-## Triển khai theo Phase (test từng bước)
+## Các quyết định kỹ thuật đã chốt
 
-### ✅ Phase 1 — HOÀN THÀNH
-
-Addin skeleton + Ribbon + DockableWindow rỗng.
-**Files đã có**: `SymbolReplacerAddin.cs`, `RibbonController.cs`, `SymbolReplacerPanel.cs`, `PictureDispConverter.cs`, `.csproj`, `.addin`
-**Test**: Build thành công, button hiện trên Drawing ribbon, DockableWindow mở được.
-
-### 🔲 Phase 2 — TIẾP THEO
-
-LibraryService + ThumbnailService + ThumbnailGridControl.
-**Mục tiêu**: Panel hiển thị danh sách symbol với thumbnail từ library file.
-
-### 🔲 Phase 3
-
-InteractionController + pick mode.
-**Mục tiêu**: Click vào symbol cũ trên bản vẽ → log đúng thông tin.
-
-### 🔲 Phase 4
-
-SymbolReplaceService + ReplaceController + ConfirmReplaceAllDialog.
-**Mục tiêu**: Replace hoàn chỉnh, Undo hoạt động.
+| #   | Quyết định                                                     | Lý do                                             |
+| --- | -------------------------------------------------------------- | ------------------------------------------------- |
+| 1   | UI dùng WPF thay WinForms                                      | MVVM pattern, binding, styling dễ hơn             |
+| 2   | Embed WPF vào DockableWindow qua HwndSource                    | Inventor DockableWindow chỉ nhận Win32 HWND       |
+| 3   | DI thủ công trong `SymbolReplacerAddin.Activate()`             | Tránh thêm dependency framework phức tạp          |
+| 4   | Symbol source: Library file + Working file kết hợp             | User không cần copy/paste thủ công                |
+| 5   | Library default path: `C:\server\System\2023\Inventor\Library` | Đường dẫn server chuẩn của công ty                |
+| 6   | Mở library file ở chế độ ẩn (`openVisible: false`)             | Không làm phiền workflow user                     |
+| 7   | Thumbnail render bằng GDI+ từ SketchedSymbolDefinition.Sketch  | Luôn sync với definition, không cần file ảnh tĩnh |
+| 8   | Thumbnail size: 80×80px, cache vào Dictionary<string, Bitmap>  | Tốc độ load nhanh từ lần 2 trở đi                 |
+| 9   | Single replace: 1 Transaction per instance                     | Granular undo cho từng thao tác                   |
+| 10  | Replace All: 1 Transaction bao toàn bộ                         | Undo 1 lần duy nhất, sạch sẽ                      |
+| 11  | Replace All có 2 scope: Current Sheet / All Sheets             | Tránh replace nhầm sang sheet khác                |
+| 12  | Ribbon entry: tab "Custom Tools"                               | Nhất quán với các tool nội bộ khác của team       |
 
 ---
 
-## Các quyết định kỹ thuật quan trọng
-
-### Symbol Library
-
-- **Default path**: `C:\MacGregor_CAS_WF\System\2023\Inventor\Library`
-- **Config**: lưu vào `config.json` trong `%AppData%\SymbolReplacer\`
-- **Mở library**: `inventorApp.Documents.Open(path, openVisible: false)` — không hiển thị lên UI
-- **Check trùng**: nếu file đang mở sẵn → reuse instance, không mở lại
-- **Palette có nút ⚙**: user browse đổi library path khác
-
-### Symbol replace logic
-
-- Symbol mới và cũ có **cùng attribute names** → copy 1-1, không cần mapping dialog
-- Khi replace: capture properties → `TransactionManager.StartTransaction()` → delete old → insert new → `EndTransaction()`
-- **Single replace**: 1 transaction per instance (user chủ động pick từng cái)
-- **Replace All**: 1 transaction bao toàn bộ (undo 1 lần)
-
-### Replace All — 2 scope
+## UI — Layout Palette
 
 ```
-[Replace All ▼]
-  ├── Current Sheet...  → Confirm dialog → replace all instances trên sheet hiện tại
-  └── All Sheets...     → Confirm dialog → replace all instances trên toàn document
+┌─────────────────────────────────┐
+│ LIBRARY SOURCE            [⚙]  │ ← Tên file library + nút đổi path
+│ ShipSymbols.idw                 │
+├─────────────────────────────────┤
+│ 🔍 [Search...              ]   │ ← Filter thumbnail theo tên
+├─────────────────────────────────┤
+│                                 │
+│  ┌────┐ ┌────┐ ┌────┐ ┌────┐   │
+│  │    │ │ ✓  │ │    │ │    │   │ ← ThumbnailGrid (WPF ItemsControl)
+│  │sym1│ │sym2│ │sym3│ │sym4│   │   Wrap tự động khi resize palette
+│  └────┘ └────┘ └────┘ └────┘   │
+│  Door_A  Door_B  Door_C  ...   │
+│                                 │
+├─────────────────────────────────┤
+│ REPLACE                         │
+│ [🔄  Replace  (Pick mode)    ]  │ ← Primary button màu accent
+│ [🔄  Replace All  ▼          ]  │ ← Dropdown: Current Sheet / All Sheets
+├─────────────────────────────────┤
+│ 🟡 PICK MODE: Click symbol...  │ ← Status bar
+└─────────────────────────────────┘
 ```
 
-Confirm dialog hiện: số lượng instance theo từng sheet, cảnh báo kiểm tra bản vẽ.
+**Resize behavior**: ThumbnailGrid chiếm toàn bộ không gian còn lại (Fill), các section khác fixed height.
 
-### Thumbnail rendering
+---
 
-- **Phương pháp**: GDI+ render từ `SketchedSymbolDefinition.Sketch` geometry
-- **Size**: 80×80px với label tên bên dưới
-- **Cache**: `Dictionary<string, Bitmap>` — render 1 lần, reuse
-- **Fallback**: nếu geometry phức tạp → placeholder icon
+## UI — WPF Style Constants (SharedStyles.xaml)
 
-### UI — Inventor style
+```xml
+<Color x:Key="BackgroundColor">#FFF0F0F0</Color>
+<Color x:Key="SurfaceColor">#FFD6D6D6</Color>
+<Color x:Key="AccentColor">#FF0078D4</Color>
+<Color x:Key="AccentHoverColor">#FF006BBD</Color>
+<Color x:Key="BorderColor">#FFB4B4B4</Color>
+<Color x:Key="TextPrimaryColor">#FF3C3C3C</Color>
+<Color x:Key="TextSecondaryColor">#FF646464</Color>
+<Color x:Key="StatusOkColor">#FF008000</Color>
+<Color x:Key="StatusPickColor">#FFC86400</Color>
+<FontFamily x:Key="UIFont">Segoe UI</FontFamily>
+<sys:Double x:Key="FontSizeNormal">8.5</sys:Double>
+<sys:Double x:Key="FontSizeSmall">7.5</sys:Double>
+```
+
+---
+
+## Inventor API — Objects quan trọng
 
 ```csharp
-ColorBackground  = Color.FromArgb(240, 240, 240)  // #F0F0F0
-ColorSectionBg   = Color.FromArgb(214, 214, 214)  // Section headers
-ColorAccent      = Color.FromArgb(0, 120, 212)    // #0078D4 — buttons, selection
-ColorBorder      = Color.FromArgb(180, 180, 180)
-Font             = "Segoe UI" 8.5pt
-```
-
-Layout dùng `TableLayoutPanel` — responsive khi resize DockableWindow.
-
-### Addin registration
-
-- **GUID**: `{7C3D8E4F-2A1B-4C5D-9E8F-1A2B3C4D5E6F}` (phải khớp trong cả 3 nơi: `[Guid]` attribute, `.addin` ClassId, `.addin` ClientId)
-- **Ribbon**: tab "Custom Tools" → panel "Symbol Tools" → button "Symbol Replacer"
-- **DockableWindow**: dock bên phải, minimum size 220×400
-
----
-
-## Inventor API — Các object quan trọng cần biết
-
-```csharp
-// Lấy drawing document
+// ── Drawing document ──────────────────────────────────────────────
 DrawingDocument doc = (DrawingDocument)_app.ActiveDocument;
 
-// Sketched symbol definitions trong file
+// ── Symbol definitions trong file ────────────────────────────────
 SketchedSymbolDefinitions defs = doc.SketchedSymbolDefinitions;
+SketchedSymbolDefinition  def  = defs["DoorSymbol_A"];
 
-// Instance của symbol trên sheet
-DrawingSketchedSymbol instance = ...; // lấy qua selection hoặc iterate
-Point2d pos = instance.Position;
-double rotation = instance.Rotation;
-double scale = instance.Scale;
+// ── Instance của symbol trên sheet ───────────────────────────────
+DrawingSketchedSymbol instance = ...; // từ selection hoặc iterate
+Point2d pos      = instance.Position;   // insert point 2D
+double  rotation = instance.Rotation;   // radians
+double  scale    = instance.Scale;
+Layer   layer    = instance.Layer;
 
-// Attributes
-AttributeSets attrSets = instance.AttributeSets;
+// ── Capture attributes trước khi xóa symbol cũ ───────────────────
+var attrValues = new Dictionary<string, object>();
+foreach (AttributeSet attrSet in instance.AttributeSets)
+    foreach (Inventor.Attribute attr in attrSet)
+        attrValues[attr.Name] = attr.Value;
 
-// Transaction cho Undo
-TransactionManager tm = _app.TransactionManager;
-Transaction t = tm.StartTransaction(doc, "Replace Symbol");
-// ... thực hiện thay đổi ...
-t.End();
+// ── Transaction cho Undo ──────────────────────────────────────────
+Transaction t = _app.TransactionManager
+    .StartTransaction((Document)doc, "Replace Symbol");
+try   { /* thay đổi */ t.End(); }
+catch { t.Abort(); throw; }
 
-// InteractionEvents cho pick mode
+// ── InteractionEvents pick mode ───────────────────────────────────
 InteractionEvents ie = _app.CommandManager.CreateInteractionEvents();
-SelectEvents se = ie.SelectEvents;
-se.AddSelectionFilter(SelectionFilterEnum.kDrawingSketchedSymbolFilter);
-se.OnSelect += OnSymbolSelected;
+ie.SelectEvents.AddSelectionFilter(
+    SelectionFilterEnum.kDrawingSketchedSymbolFilter);
+ie.SelectEvents.OnSelect += OnSymbolSelected;
+ie.OnTerminate           += OnPickModeEnded;
 ie.Start();
+
+// ── Embed WPF vào DockableWindow qua HwndSource ───────────────────
+// Xem CLAUDE.md mục "Embed WPF vào DockableWindow"
 ```
 
 ---
 
-## Vấn đề đã biết / Cần chú ý
+## Config / Settings
 
-1. **DockableWindow HWND**: phải dùng Win32 `SetParent()` để embed WinForms vào DockableWindow — không có API managed trực tiếp.
-2. **COM reload**: khi addin reload (`firstTime=false`), ButtonDefinition và DockableWindow đã tồn tại → dùng `RewireEvents()` thay vì tạo lại.
-3. **Library file đang mở**: kiểm tra `_app.Documents` trước khi `Documents.Open()` để tránh mở 2 lần.
-4. **Undo history**: Replace All tạo 1 transaction lớn → 1 Undo step. Single replace mỗi instance = 1 Undo step.
-5. **EmbedInteropTypes = False**: bắt buộc cho Inventor interop DLL.
+**Config file**: `%AppData%\YourCompany\SymbolReplacer\config.json`
+
+```json
+{
+  "libraryPath": "C:\\server\\System\\2023\\Inventor\\Library",
+  "lastUsedSymbol": "",
+  "windowWidth": 280,
+  "windowHeight": 600
+}
+```
 
 ---
 
-## 🔄 Session Handoff Log
+## Phases triển khai
 
-<!-- Claude Code tự cập nhật mục này khi gần hết limit -->
-<!-- Đây là "bàn giao ca" — session mới đọc đây để biết tiếp tục từ đâu -->
+### 🔧 Phase 1 — Addin Skeleton + Ribbon + DockableWindow
 
-### Session mới nhất
+**Mục tiêu**: Addin load được, button hiện trên ribbon, palette mở được.
+**Files đã tạo**:
 
-- **Ngày**: _(Claude Code điền)_
-- **Phase đang làm**: _(ví dụ: Phase 2 — LibraryService)_
-- **Trạng thái**: _(In progress / Completed)_
+- `SymbolReplacer.csproj` ← cần fix `InventorBinPath` theo máy thực tế
+- `SymbolReplacer.addin`
+- `SymbolReplacerAddin.cs`
+- `Controllers/RibbonController.cs`
+- `Views/SymbolReplacerPanel.cs` ← WinForms tạm, Phase 2 chuyển sang WPF
+- `Helpers/PictureDispConverter.cs`
 
-#### Files đã tạo/sửa trong session này
+**Vấn đề tồn đọng**:
 
-| File         | Trạng thái                        | Ghi chú        |
-| ------------ | --------------------------------- | -------------- |
-| _(tên file)_ | ✅ Done / 🔧 Partial / ❌ Has bug | _(mô tả ngắn)_ |
+- Build lỗi CS0246 vì `Autodesk.Inventor.Interop.dll` không tìm thấy
+- Fix: cập nhật `<InventorBinPath>` trong `.csproj` đúng với máy thực tế
+- Lệnh tìm đường dẫn:
+  ```powershell
+  Get-ChildItem "C:\Program Files\Autodesk" -Recurse `
+    -Filter "Autodesk.Inventor.Interop.dll" | Select FullName
+  ```
 
-#### Vấn đề phát sinh & cách giải quyết
+**Test khi Phase 1 xong**:
 
-- _(ghi lại nếu có quirk của Inventor API, workaround đã dùng, v.v.)_
+- [ ] Build không lỗi
+- [ ] Addin xuất hiện trong Inventor Add-In Manager
+- [ ] Tab "Custom Tools" hiện trên Drawing ribbon
+- [ ] Click button → DockableWindow mở bên phải
+- [ ] Log khởi động hiện trong DebugView / VS Output
 
-#### Bước tiếp theo CỤ THỂ (next session bắt đầu từ đây)
+### 🔲 Phase 2 — LibraryService + ThumbnailService + WPF Palette
 
-```
-1. Mở file: _(tên file)_
-2. Implement: _(method/class cụ thể)_
-3. Lý do: _(context ngắn)_
-```
+**Mục tiêu**: Palette hiển thị danh sách symbol với thumbnail từ library file.
+**Files cần tạo**:
 
-#### Quyết định kỹ thuật mới (nếu có thay đổi so với CONTEXT.md ban đầu)
+- `Models/SymbolDefinitionModel.cs`
+- `Models/LibraryConfigModel.cs`
+- `Services/ILibraryService.cs` + `LibraryService.cs`
+- `Services/IThumbnailService.cs` + `ThumbnailService.cs`
+- `Services/IConfigService.cs` + `ConfigService.cs`
+- `Views/SymbolReplacerPanel.xaml` + `.xaml.cs` ← thay thế WinForms
+- `Views/Styles/SharedStyles.xaml`
+- `ViewModels/SymbolReplacerViewModel.cs`
+- `Helpers/CoordinateHelper.cs`
+- `Helpers/GdiRenderHelper.cs`
 
-- _(ghi lại nếu đã thay đổi hướng tiếp cận)_
+**Test**: Mở palette → thumbnail symbol từ library hiện đúng, search lọc được.
+
+### 🔲 Phase 3 — InteractionController + Pick Mode
+
+**Mục tiêu**: Click symbol cũ trên bản vẽ → log đúng thông tin.
+**Files cần tạo**:
+
+- `Controllers/InteractionController.cs`
+- `Models/ReplaceOperationModel.cs`
+
+**Test**: Click "Replace" → cursor thay đổi → click symbol cũ → log hiện Position, Rotation, Scale, Attributes đúng.
+
+### 🔲 Phase 4 — SymbolReplaceService + ReplaceController + ConfirmDialog
+
+**Mục tiêu**: Replace hoàn chỉnh, Undo hoạt động, Replace All với confirm.
+**Files cần tạo**:
+
+- `Services/ISymbolReplaceService.cs` + `SymbolReplaceService.cs`
+- `Controllers/ReplaceController.cs`
+- `Controllers/PaletteController.cs`
+- `Views/ConfirmReplaceAllDialog.xaml` + `.xaml.cs`
+- `ViewModels/ConfirmReplaceAllViewModel.cs`
+
+**Test**:
+
+- [ ] Single replace: giữ nguyên position/rotation/scale/attributes
+- [ ] Ctrl+Z undo từng instance
+- [ ] Replace All Current Sheet: confirm dialog đúng số lượng
+- [ ] Replace All All Sheets: hiện số lượng theo từng sheet, cảnh báo rõ
 
 ---
 
-## 📋 Prompt mẫu cho session mới
+## Vấn đề đã biết / Quirks của API
 
-Khi mở Claude Code lần tiếp, paste prompt này:
-
-```
-Read CONTEXT.md carefully, especially the "Session Handoff Log" section at the bottom.
-Then continue exactly from the "Bước tiếp theo" listed there.
-Follow all coding rules: English code, Vietnamese comments and logs.
-Do not re-implement anything marked as ✅ Done.
-```
+| #   | Vấn đề                                       | Nguyên nhân                                      | Giải pháp                                     |
+| --- | -------------------------------------------- | ------------------------------------------------ | --------------------------------------------- |
+| 1   | Build lỗi CS0246                             | HintPath sai đường dẫn DLL                       | Cập nhật `<InventorBinPath>` trong `.csproj`  |
+| 2   | `$(AppData)` không hợp lệ trong `.addin` XML | `.addin` là XML thuần, không expand MSBuild vars | Dùng đường dẫn tương đối `SymbolReplacer.dll` |
+| 3   | `EmbedInteropTypes` phải là `False`          | Inventor API resolve interfaces lúc runtime      | Đã fix trong `.csproj`                        |

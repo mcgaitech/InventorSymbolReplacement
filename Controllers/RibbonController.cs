@@ -2,7 +2,8 @@ using System;
 using System.Diagnostics;
 using System.Drawing;
 using System.Runtime.InteropServices;
-using System.Windows.Forms;
+using System.Windows.Forms;                      // NativeWindow (DockWindowSizer)
+using System.Windows.Interop;                    // HwndSource, HwndSourceParameters
 using Inventor;
 using SymbolReplacer.Helpers;
 using SymbolReplacer.Views;
@@ -11,41 +12,58 @@ namespace SymbolReplacer.Controllers
 {
     /// <summary>
     /// Chịu trách nhiệm:
-    /// 1. Tạo/tìm tab "Custom Tools" trên Drawing ribbon
-    /// 2. Tạo button "Symbol Replacer" với icon
-    /// 3. Quản lý DockableWindow (tạo, toggle, resize, cleanup)
+    ///   1. Tạo/tìm tab "Custom Tools" trên Drawing ribbon
+    ///   2. Tạo button "Symbol Replacer" với icon
+    ///   3. Quản lý DockableWindow — nhúng WPF UserControl qua HwndSource
+    ///
+    /// Tại sao dùng HwndSource thay vì SetParent + SetWindowLong:
+    ///   HwndSource tạo Win32 HWND với WS_CHILD ngay từ đầu (qua HwndSourceParameters.WindowStyle).
+    ///   Không cần các hack WS_POPUP → WS_CHILD, không cần SWP_FRAMECHANGED, RedrawWindow, v.v.
+    ///   WPF rendering pipeline tự xử lý layout, painting, và resize thông qua Dispatcher.
     /// </summary>
     public class RibbonController
     {
         // ─── Hằng số ──────────────────────────────────────────────────────────
         private const string LOG_PREFIX           = "[RibbonController]";
-        private const string RIBBON_NAME          = "Drawing";               // Ribbon của môi trường Drawing
+        private const string RIBBON_NAME          = "Drawing";
         private const string TAB_ID               = "id.Tab.CustomTools";
         private const string TAB_DISPLAY          = "Custom Tools";
         private const string PANEL_ID             = "id.Panel.SymbolTools";
         private const string PANEL_DISPLAY        = "Symbol Tools";
         private const string BUTTON_ID            = "id.Button.SymbolReplacer";
-        private const string BUTTON_DISPLAY       = "Symbol\nReplacer";     // \n để xuống dòng trên ribbon
+        private const string BUTTON_DISPLAY       = "Symbol\nReplacer";
         private const string BUTTON_TOOLTIP       = "Symbol Replacer";
         private const string BUTTON_DESCRIPTION   = "Replace drawing symbols while preserving position and attributes";
         private const string DOCKWIN_ID           = "SymbolReplacer.DockableWindow";
         private const string DOCKWIN_TITLE        = "Symbol Replacer";
         private const string ADDIN_GUID           = "{7C3D8E4F-2A1B-4C5D-9E8F-1A2B3C4D5E6F}";
 
-        // ─── Win32 API cho việc embed WinForms vào DockableWindow ────────────
-        [DllImport("user32.dll", SetLastError = true)]
-        private static extern IntPtr SetParent(IntPtr hWndChild, IntPtr hWndNewParent);
+        // ─── Win32 — chỉ giữ những gì cần thiết ──────────────────────────────
+        // GetClientRect: lấy kích thước thực của DockableWindow khi tạo HwndSource
+        // MoveWindow   : resize HwndSource HWND khi DockableWindow resize (qua DockWindowSizer)
 
         [DllImport("user32.dll", SetLastError = true)]
         private static extern bool MoveWindow(IntPtr hWnd, int x, int y, int nWidth, int nHeight, bool bRepaint);
+
+        [DllImport("user32.dll")]
+        private static extern bool GetClientRect(IntPtr hWnd, out RECT lpRect);
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct RECT { public int Left, Top, Right, Bottom; }
+
+        // WS_CHILD | WS_VISIBLE — đặt ngay khi tạo HwndSource (không cần SetWindowLong sau)
+        private const int WS_CHILD   = 0x40000000;
+        private const int WS_VISIBLE = 0x10000000;
 
         // ─── Fields ───────────────────────────────────────────────────────────
         private readonly Inventor.Application _app;
         private ButtonDefinition              _buttonDef;
         private DockableWindow                _dockableWindow;
-        private DockableWindowsEvents         _dockableWindowsEvents;  // lấy qua DockableWindows.Events
-        private DockWindowSizer               _dockWindowSizer;        // NativeWindow để bắt WM_SIZE
-        private SymbolReplacerPanel           _panel;
+        private DockableWindowsEvents         _dockableWindowsEvents;
+        private HwndSource                    _hwndSource;        // WPF host window nhúng vào DockableWindow
+        private DockWindowSizer               _dockWindowSizer;   // NativeWindow bắt WM_SIZE
+        private SymbolReplacerPanel           _panel;             // WPF UserControl
+        private System.Windows.Forms.Timer    _embedRetryTimer;   // Retry khi DockableWindow.HWND=0 ở kAfter
 
         // ─── Constructor ──────────────────────────────────────────────────────
         public RibbonController(Inventor.Application app)
@@ -57,66 +75,50 @@ namespace SymbolReplacer.Controllers
         // ─── Public properties ────────────────────────────────────────────────
 
         /// <summary>
-        /// WinForms panel đã được nhúng vào DockableWindow.
-        /// PaletteController dùng để đăng ký events và cập nhật ThumbnailGrid.
-        /// Luôn được tạo sau CreateRibbonUI(), có thể chưa có HWND nếu chưa show.
+        /// WPF panel đã được nhúng vào DockableWindow.
+        /// PaletteController dùng để đăng ký events và cập nhật SymbolGrid.
         /// </summary>
         public SymbolReplacerPanel Panel => _panel;
 
         // ─── Public methods ───────────────────────────────────────────────────
 
-        /// <summary>
-        /// Tạo toàn bộ ribbon UI: tab, panel, button, dockable window.
-        /// Chỉ gọi khi firstTime = true trong Activate().
-        /// </summary>
+        /// <summary>Tạo toàn bộ Ribbon UI: tab, panel, button, DockableWindow.</summary>
         public void CreateRibbonUI()
         {
             Debug.WriteLine($"{LOG_PREFIX} Bắt đầu tạo Ribbon UI...");
 
             try
             {
-                // Bước 1: Lấy Drawing ribbon
                 var ribbon = GetDrawingRibbon();
                 if (ribbon == null) return;
 
-                // Bước 2: Tìm hoặc tạo tab "Custom Tools"
                 var tab = GetOrCreateTab(ribbon);
                 if (tab == null) return;
 
-                // Bước 3: Tìm hoặc tạo panel "Symbol Tools" trong tab
                 var panel = GetOrCreatePanel(tab);
                 if (panel == null) return;
 
-                // Bước 4: Tạo ButtonDefinition (command definition)
                 CreateButtonDefinition();
-
-                // Bước 5: Thêm button vào panel
                 AddButtonToPanel(panel);
-
-                // Bước 6: Tạo DockableWindow và embed WinForms panel
                 CreateDockableWindow();
 
                 Debug.WriteLine($"{LOG_PREFIX} Ribbon UI tạo THÀNH CÔNG.");
             }
             catch (Exception ex)
             {
-                // Lỗi tạo ribbon UI
                 Debug.WriteLine($"{LOG_PREFIX} LỖI tạo Ribbon UI: {ex.Message}");
                 Debug.WriteLine($"{LOG_PREFIX} Stack trace:\n{ex.StackTrace}");
                 throw;
             }
         }
 
-        /// <summary>
-        /// Re-wire event handlers khi addin được reload (firstTime = false).
-        /// </summary>
+        /// <summary>Re-wire event handlers khi addin được reload (firstTime=false).</summary>
         public void RewireEvents()
         {
             Debug.WriteLine($"{LOG_PREFIX} Re-wire events...");
 
             try
             {
-                // Tìm lại ButtonDefinition đã tồn tại
                 _buttonDef = (ButtonDefinition)_app.CommandManager.ControlDefinitions[BUTTON_ID];
                 if (_buttonDef != null)
                 {
@@ -125,7 +127,6 @@ namespace SymbolReplacer.Controllers
                     Debug.WriteLine($"{LOG_PREFIX} Re-wire button event thành công.");
                 }
 
-                // Tìm lại DockableWindow và re-wire OnShow event
                 try
                 {
                     _dockableWindow = _app.UserInterfaceManager.DockableWindows[DOCKWIN_ID];
@@ -134,76 +135,80 @@ namespace SymbolReplacer.Controllers
                         _dockableWindowsEvents = _app.UserInterfaceManager.DockableWindows.Events;
                         _dockableWindowsEvents.OnShow -= OnDockableWindowShow;
                         _dockableWindowsEvents.OnShow += OnDockableWindowShow;
-                        Debug.WriteLine($"{LOG_PREFIX} Re-wire dockable window OnShow event thành công.");
+                        Debug.WriteLine($"{LOG_PREFIX} Re-wire DockableWindow OnShow event thành công.");
                     }
                 }
                 catch
                 {
-                    // DockableWindow chưa tồn tại — bỏ qua
                     Debug.WriteLine($"{LOG_PREFIX} DockableWindow chưa tồn tại khi re-wire, bỏ qua.");
                 }
             }
             catch (Exception ex)
             {
-                // Lỗi khi re-wire events
                 Debug.WriteLine($"{LOG_PREFIX} LỖI re-wire events: {ex.Message}");
             }
         }
 
-        /// <summary>
-        /// Dọn dẹp tài nguyên khi addin bị tắt.
-        /// </summary>
+        /// <summary>Dọn dẹp tài nguyên khi addin bị tắt.</summary>
         public void Cleanup()
         {
             Debug.WriteLine($"{LOG_PREFIX} Bắt đầu cleanup...");
 
             try
             {
-                // Detach button event
                 if (_buttonDef != null)
-                {
                     _buttonDef.OnExecute -= OnSymbolReplacerButtonExecute;
-                    Debug.WriteLine($"{LOG_PREFIX} Đã detach button event.");
-                }
+            }
+            catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI detach button: {ex.Message}"); }
 
-                // Detach dockable window OnShow event
+            try
+            {
                 if (_dockableWindowsEvents != null)
-                {
                     _dockableWindowsEvents.OnShow -= OnDockableWindowShow;
-                    Debug.WriteLine($"{LOG_PREFIX} Đã detach dockable window event.");
-                }
+            }
+            catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI detach dockable events: {ex.Message}"); }
 
-                // Giải phóng NativeWindow sizer
+            try
+            {
+                if (_embedRetryTimer != null)
+                {
+                    _embedRetryTimer.Stop();
+                    _embedRetryTimer.Dispose();
+                    _embedRetryTimer = null;
+                }
+            }
+            catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI dispose retry timer: {ex.Message}"); }
+
+            try
+            {
                 if (_dockWindowSizer != null)
                 {
                     _dockWindowSizer.ReleaseHandle();
                     _dockWindowSizer = null;
-                    Debug.WriteLine($"{LOG_PREFIX} Đã release DockWindowSizer.");
                 }
-
-                // Đóng và dispose WinForms panel
-                if (_panel != null && !_panel.IsDisposed)
-                {
-                    _panel.Close();
-                    _panel.Dispose();
-                    _panel = null;
-                    Debug.WriteLine($"{LOG_PREFIX} Đã dispose WinForms panel.");
-                }
-
-                Debug.WriteLine($"{LOG_PREFIX} Cleanup THÀNH CÔNG.");
             }
-            catch (Exception ex)
+            catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI release sizer: {ex.Message}"); }
+
+            try
             {
-                // Lỗi khi cleanup
-                Debug.WriteLine($"{LOG_PREFIX} LỖI cleanup: {ex.Message}");
+                if (_hwndSource != null)
+                {
+                    _hwndSource.Dispose();
+                    _hwndSource = null;
+                }
             }
+            catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI dispose HwndSource: {ex.Message}"); }
+
+            // WPF UserControl không có Dispose — chỉ cần bỏ reference
+            _panel = null;
+
+            Debug.WriteLine($"{LOG_PREFIX} Cleanup THÀNH CÔNG.");
         }
 
         // ─── Private: Ribbon setup ────────────────────────────────────────────
 
         private Ribbon GetDrawingRibbon()
         {
-            // Lấy ribbon của môi trường Drawing
             try
             {
                 var ribbon = _app.UserInterfaceManager.Ribbons[RIBBON_NAME];
@@ -212,7 +217,6 @@ namespace SymbolReplacer.Controllers
             }
             catch (Exception ex)
             {
-                // Không tìm thấy Drawing ribbon — có thể không ở trong môi trường Drawing
                 Debug.WriteLine($"{LOG_PREFIX} LỖI lấy Drawing ribbon: {ex.Message}");
                 return null;
             }
@@ -220,18 +224,13 @@ namespace SymbolReplacer.Controllers
 
         private RibbonTab GetOrCreateTab(Ribbon ribbon)
         {
-            // Tìm tab "Custom Tools" nếu đã tồn tại, ngược lại tạo mới
             try
             {
                 var tab = ribbon.RibbonTabs[TAB_ID];
                 Debug.WriteLine($"{LOG_PREFIX} Tab '{TAB_DISPLAY}' đã tồn tại, tái sử dụng.");
                 return tab;
             }
-            catch
-            {
-                // Tab chưa tồn tại — tạo mới
-                Debug.WriteLine($"{LOG_PREFIX} Tab '{TAB_DISPLAY}' chưa tồn tại, tạo mới...");
-            }
+            catch { Debug.WriteLine($"{LOG_PREFIX} Tab '{TAB_DISPLAY}' chưa tồn tại, tạo mới..."); }
 
             try
             {
@@ -241,7 +240,6 @@ namespace SymbolReplacer.Controllers
             }
             catch (Exception ex)
             {
-                // Lỗi tạo tab
                 Debug.WriteLine($"{LOG_PREFIX} LỖI tạo tab: {ex.Message}");
                 return null;
             }
@@ -249,18 +247,13 @@ namespace SymbolReplacer.Controllers
 
         private RibbonPanel GetOrCreatePanel(RibbonTab tab)
         {
-            // Tìm panel "Symbol Tools" nếu đã tồn tại, ngược lại tạo mới
             try
             {
                 var panel = tab.RibbonPanels[PANEL_ID];
                 Debug.WriteLine($"{LOG_PREFIX} Panel '{PANEL_DISPLAY}' đã tồn tại, tái sử dụng.");
                 return panel;
             }
-            catch
-            {
-                // Panel chưa tồn tại — tạo mới
-                Debug.WriteLine($"{LOG_PREFIX} Panel '{PANEL_DISPLAY}' chưa tồn tại, tạo mới...");
-            }
+            catch { Debug.WriteLine($"{LOG_PREFIX} Panel '{PANEL_DISPLAY}' chưa tồn tại, tạo mới..."); }
 
             try
             {
@@ -270,7 +263,6 @@ namespace SymbolReplacer.Controllers
             }
             catch (Exception ex)
             {
-                // Lỗi tạo panel
                 Debug.WriteLine($"{LOG_PREFIX} LỖI tạo panel: {ex.Message}");
                 return null;
             }
@@ -278,32 +270,22 @@ namespace SymbolReplacer.Controllers
 
         private void CreateButtonDefinition()
         {
-            // Kiểm tra ButtonDefinition đã tồn tại chưa (tránh duplicate khi debug reload)
             try
             {
                 _buttonDef = (ButtonDefinition)_app.CommandManager.ControlDefinitions[BUTTON_ID];
-                Debug.WriteLine($"{LOG_PREFIX} ButtonDefinition '{BUTTON_ID}' đã tồn tại, tái sử dụng.");
-
-                // Re-wire event phòng trường hợp bị mất
+                Debug.WriteLine($"{LOG_PREFIX} ButtonDefinition đã tồn tại, tái sử dụng.");
                 _buttonDef.OnExecute -= OnSymbolReplacerButtonExecute;
                 _buttonDef.OnExecute += OnSymbolReplacerButtonExecute;
                 return;
             }
-            catch
-            {
-                // Chưa tồn tại — sẽ tạo mới bên dưới
-                Debug.WriteLine($"{LOG_PREFIX} ButtonDefinition chưa tồn tại, tạo mới...");
-            }
+            catch { Debug.WriteLine($"{LOG_PREFIX} ButtonDefinition chưa tồn tại, tạo mới..."); }
 
-            // Load icon từ embedded resources
             var icon32Bmp = PictureDispConverter.LoadFromResource("ReplaceSymbol_32.png");
             var icon16Bmp = PictureDispConverter.LoadFromResource("ReplaceSymbol_16.png");
 
-            // Nếu không có icon file → tạo icon placeholder màu xanh để test
             if (icon32Bmp == null)
             {
-                // Tạo icon placeholder để không bị crash khi chưa có file ảnh
-                Debug.WriteLine($"{LOG_PREFIX} CẢNH BÁO: Không có icon file, tạo placeholder.");
+                Debug.WriteLine($"{LOG_PREFIX} CẢNH BÁO: Không có icon, dùng placeholder.");
                 icon32Bmp = CreatePlaceholderIcon(32);
                 icon16Bmp = CreatePlaceholderIcon(16);
             }
@@ -311,8 +293,6 @@ namespace SymbolReplacer.Controllers
             var icon32 = PictureDispConverter.ToIPictureDisp(icon32Bmp);
             var icon16 = PictureDispConverter.ToIPictureDisp(icon16Bmp);
 
-            // Tạo ButtonDefinition
-            // Lưu ý: Inventor 2023 API dùng ButtonDisplayEnum thay vì ButtonStyleEnum
             _buttonDef = _app.CommandManager.ControlDefinitions.AddButtonDefinition(
                 DisplayName:    BUTTON_DISPLAY,
                 InternalName:   BUTTON_ID,
@@ -325,143 +305,220 @@ namespace SymbolReplacer.Controllers
                 ButtonDisplay:  ButtonDisplayEnum.kAlwaysDisplayText
             );
 
-            // Đăng ký event handler khi user click button
             _buttonDef.OnExecute += OnSymbolReplacerButtonExecute;
+            Debug.WriteLine($"{LOG_PREFIX} ButtonDefinition tạo THÀNH CÔNG: {BUTTON_ID}");
 
-            Debug.WriteLine($"{LOG_PREFIX} ButtonDefinition tạo THÀNH CÔNG với ID: {BUTTON_ID}");
-
-            // Giải phóng bitmap sau khi convert
             icon32Bmp?.Dispose();
             icon16Bmp?.Dispose();
         }
 
         private void AddButtonToPanel(RibbonPanel panel)
         {
-            // Thêm button vào panel nếu chưa có
             try
             {
-                // Kiểm tra xem control đã có trong panel chưa
-                var existingControl = panel.CommandControls[BUTTON_ID];
+                var _ = panel.CommandControls[BUTTON_ID];
                 Debug.WriteLine($"{LOG_PREFIX} Button đã có trong panel, bỏ qua thêm mới.");
             }
             catch
             {
-                // Chưa có trong panel — thêm vào
                 panel.CommandControls.AddButton(_buttonDef, UseLargeIcon: true);
                 Debug.WriteLine($"{LOG_PREFIX} Đã thêm button vào panel '{PANEL_DISPLAY}'.");
             }
         }
 
-        // ─── Private: DockableWindow setup ───────────────────────────────────
+        // ─── Private: DockableWindow + WPF embed ─────────────────────────────
 
         private void CreateDockableWindow()
         {
             Debug.WriteLine($"{LOG_PREFIX} Bắt đầu tạo DockableWindow...");
 
             var uiManager = _app.UserInterfaceManager;
-
-            // DockableWindowsEvents lấy qua DockableWindows.Events (Inventor 2023 API)
             _dockableWindowsEvents = uiManager.DockableWindows.Events;
 
-            // Kiểm tra DockableWindow đã tồn tại chưa
             try
             {
                 _dockableWindow = uiManager.DockableWindows[DOCKWIN_ID];
                 Debug.WriteLine($"{LOG_PREFIX} DockableWindow đã tồn tại, tái sử dụng.");
-
-                // Re-wire OnShow event để đảm bảo panel được embed khi hiện
                 _dockableWindowsEvents.OnShow -= OnDockableWindowShow;
                 _dockableWindowsEvents.OnShow += OnDockableWindowShow;
                 return;
             }
-            catch
-            {
-                // Chưa tồn tại — tạo mới
-                Debug.WriteLine($"{LOG_PREFIX} DockableWindow chưa tồn tại, tạo mới...");
-            }
+            catch { Debug.WriteLine($"{LOG_PREFIX} DockableWindow chưa tồn tại, tạo mới..."); }
 
-            // Tạo DockableWindow mới
             _dockableWindow = uiManager.DockableWindows.Add(
                 ClientId:     ADDIN_GUID,
                 InternalName: DOCKWIN_ID,
                 Title:        DOCKWIN_TITLE
             );
 
-            // Cấu hình DockableWindow
             _dockableWindow.ShowTitleBar = true;
-            _dockableWindow.Visible      = false;  // Ẩn ban đầu, hiện khi click button
+            _dockableWindow.Visible      = false;
             _dockableWindow.SetMinimumSize(220, 400);
-
-            // Dock bên phải theo mặc định
             _dockableWindow.DockingState = DockingStateEnum.kDockRight;
 
-            Debug.WriteLine($"{LOG_PREFIX} DockableWindow tạo xong, đang thử embed WinForms panel...");
+            Debug.WriteLine($"{LOG_PREFIX} DockableWindow tạo xong — thử embed WPF panel...");
 
-            // Thử embed ngay — nếu HWND đã có sẵn (không phải lúc nào cũng có khi Visible=false)
-            EmbedWinFormsPanel();
+            // Thử embed ngay; nếu HWND=0 (chưa show) sẽ retry trong OnDockableWindowShow
+            EmbedWpfPanel();
 
-            // Đăng ký OnShow để embed panel lần đầu khi HWND chưa có lúc tạo
-            // và để re-attach NativeWindow sizer nếu cần
             _dockableWindowsEvents.OnShow += OnDockableWindowShow;
 
             Debug.WriteLine($"{LOG_PREFIX} DockableWindow tạo THÀNH CÔNG.");
         }
 
-        private void EmbedWinFormsPanel()
+        /// <summary>
+        /// Nhúng WPF UserControl vào DockableWindow qua HwndSource.
+        ///
+        /// Tại sao HwndSource tốt hơn SetParent + SetWindowLong:
+        ///   - HwndSourceParameters.WindowStyle = WS_CHILD | WS_VISIBLE tạo HWND đúng ngay từ đầu.
+        ///   - Không cần hack WS_POPUP → WS_CHILD, không cần SWP_FRAMECHANGED.
+        ///   - WPF Dispatcher xử lý layout/paint tự động, không cần RedrawWindow.
+        ///   - HwndSourceParameters.ParentWindow thiết lập parent đúng cho COM environment.
+        ///
+        /// Ba nguyên nhân gây palette trống — tất cả được xử lý tại đây:
+        ///   1. Không có Application.Current → WPF không render nội dung trong COM host.
+        ///   2. DockableWindow.HWND = 0 ngay cả trong kAfter → HwndSource chưa được tạo → retry timer.
+        ///   3. Chưa gọi UpdateLayout() sau khi gán RootVisual → WPF không vẽ lần đầu.
+        /// </summary>
+        private void EmbedWpfPanel()
         {
-            // Tạo WinForms panel nếu chưa có
-            if (_panel == null || _panel.IsDisposed)
+            // ── Fix 1: Đảm bảo WPF Application instance tồn tại ─────────────────
+            // Bắt buộc khi host WPF trong COM/non-WPF process (như Inventor addin).
+            // Không có Application.Current → ResourceDictionary / Theme / Renderer không hoạt động
+            // → WPF control được tạo nhưng không vẽ gì.
+            if (System.Windows.Application.Current == null)
             {
-                _panel = new SymbolReplacerPanel();
-                _panel.TopLevel = false;
-                _panel.FormBorderStyle = System.Windows.Forms.FormBorderStyle.None;
+                new System.Windows.Application
+                {
+                    ShutdownMode = System.Windows.ShutdownMode.OnExplicitShutdown
+                };
+                Debug.WriteLine($"{LOG_PREFIX} WPF Application instance đã được tạo.");
             }
 
-            // Lấy HWND của DockableWindow để làm parent
+            // ── Tạo WPF panel nếu chưa có ────────────────────────────────────────
+            if (_panel == null)
+            {
+                try
+                {
+                    _panel = new SymbolReplacerPanel();
+                    Debug.WriteLine($"{LOG_PREFIX} WPF SymbolReplacerPanel đã tạo.");
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"{LOG_PREFIX} LỖI khi tạo SymbolReplacerPanel: {ex.Message}");
+                    Debug.WriteLine($"{LOG_PREFIX} Stack:\n{ex.StackTrace}");
+                    return;
+                }
+            }
+
+            // ── Fix 2: Kiểm tra HWND — nếu = 0 thì schedule retry ────────────────
+            // Inventor quirk: DockableWindow.HWND có thể = 0 ngay cả trong OnShow(kAfter).
+            // Giải pháp: retry sau 200 ms qua WinForms Timer (chạy trên UI thread).
             int dockHwnd = _dockableWindow.HWND;
             Debug.WriteLine($"{LOG_PREFIX} DockableWindow HWND: {dockHwnd}");
 
             if (dockHwnd == 0)
             {
-                // HWND = 0 nghĩa là DockableWindow chưa được tạo hoàn toàn (chưa hiển thị lần đầu)
-                // OnDockableWindowShow sẽ gọi lại EmbedWinFormsPanel khi HWND có sẵn
-                Debug.WriteLine($"{LOG_PREFIX} CẢNH BÁO: DockableWindow HWND = 0, sẽ embed khi OnShow.");
+                Debug.WriteLine($"{LOG_PREFIX} HWND = 0 — schedule retry sau 200 ms.");
+                ScheduleEmbedRetry();
                 return;
             }
 
-            // Reparent WinForms panel vào DockableWindow
-            SetParent(_panel.Handle, new IntPtr(dockHwnd));
-            _panel.Show();
+            // HWND hợp lệ — hủy retry timer nếu đang chạy
+            StopEmbedRetry();
 
-            // Resize panel cho khớp với DockableWindow hiện tại
-            int w = _dockableWindow.Width;
-            int h = _dockableWindow.Height;
-            if (w > 0 && h > 0)
-                MoveWindow(_panel.Handle, 0, 0, w, h, true);
+            IntPtr hwndParent = new IntPtr(dockHwnd);
 
-            // Attach NativeWindow sizer để bắt WM_SIZE từ DockableWindow HWND
-            if (_dockWindowSizer == null)
+            // Lấy kích thước client area thực từ Win32 (Inventor API thường trả về 0)
+            int w = 220, h = 400;
+            RECT rect;
+            if (GetClientRect(hwndParent, out rect))
             {
-                _dockWindowSizer = new DockWindowSizer(new IntPtr(dockHwnd), _panel);
-                Debug.WriteLine($"{LOG_PREFIX} DockWindowSizer đã attach HWND {dockHwnd}.");
+                w = Math.Max(rect.Right - rect.Left, 220);
+                h = Math.Max(rect.Bottom - rect.Top, 400);
+                Debug.WriteLine($"{LOG_PREFIX} ClientRect: {w}×{h}px");
             }
 
-            Debug.WriteLine($"{LOG_PREFIX} Embed WinForms panel THÀNH CÔNG. Panel HWND: {_panel.Handle}");
+            // Dispose HwndSource cũ nếu đang re-embed
+            if (_hwndSource != null)
+            {
+                _hwndSource.Dispose();
+                _hwndSource = null;
+                Debug.WriteLine($"{LOG_PREFIX} HwndSource cũ đã dispose.");
+            }
+
+            // Tạo HwndSource — Win32 HWND có WS_CHILD | WS_VISIBLE, parent = DockableWindow
+            var parameters = new HwndSourceParameters("SymbolReplacer.WpfHost")
+            {
+                ParentWindow = hwndParent,
+                WindowStyle  = WS_CHILD | WS_VISIBLE,
+                Width        = w,
+                Height       = h,
+                PositionX    = 0,
+                PositionY    = 0,
+            };
+
+            _hwndSource = new HwndSource(parameters);
+            _hwndSource.RootVisual = _panel;
+
+            // ── Fix 3: Kích hoạt layout pass đầu tiên ────────────────────────────
+            // Trong COM host không có WPF message loop riêng, WPF không tự layout
+            // sau khi RootVisual được gán. Gọi UpdateLayout() để vẽ ngay lập tức.
+            _panel.UpdateLayout();
+
+            Debug.WriteLine($"{LOG_PREFIX} WPF embed THÀNH CÔNG: HWND={_hwndSource.Handle}, {w}×{h}px");
+
+            // Subclass DockableWindow HWND để bắt WM_SIZE và resize HwndSource theo
+            if (_dockWindowSizer == null)
+            {
+                _dockWindowSizer = new DockWindowSizer(hwndParent, _hwndSource.Handle);
+                Debug.WriteLine($"{LOG_PREFIX} DockWindowSizer attached.");
+            }
+            else
+            {
+                _dockWindowSizer.UpdateChildHandle(_hwndSource.Handle);
+                Debug.WriteLine($"{LOG_PREFIX} DockWindowSizer child handle updated.");
+            }
         }
 
-        // ─── Private: Placeholder icon (dùng khi chưa có file ảnh) ──────────
-
-        private static System.Drawing.Bitmap CreatePlaceholderIcon(int size)
+        /// <summary>Tạo/khởi động retry timer để gọi lại EmbedWpfPanel sau 200 ms.</summary>
+        private void ScheduleEmbedRetry()
         {
-            // Tạo icon placeholder đơn giản với chữ "SR" để nhận biết button
-            var bmp = new System.Drawing.Bitmap(size, size);
-            using (var g = System.Drawing.Graphics.FromImage(bmp))
+            if (_embedRetryTimer == null)
             {
-                g.Clear(System.Drawing.Color.FromArgb(0, 120, 212)); // Màu xanh Inventor
+                _embedRetryTimer = new System.Windows.Forms.Timer { Interval = 200 };
+                _embedRetryTimer.Tick += (s, e) =>
+                {
+                    Debug.WriteLine($"{LOG_PREFIX} Retry EmbedWpfPanel (timer tick)...");
+                    _embedRetryTimer.Stop();
+                    EmbedWpfPanel();
+                };
+            }
+            // Restart timer (trường hợp đang chạy rồi)
+            _embedRetryTimer.Stop();
+            _embedRetryTimer.Start();
+        }
 
-                // Vẽ chữ "SR" (Symbol Replacer) nhỏ
+        /// <summary>Dừng retry timer nếu đang chạy.</summary>
+        private void StopEmbedRetry()
+        {
+            if (_embedRetryTimer != null)
+            {
+                _embedRetryTimer.Stop();
+                Debug.WriteLine($"{LOG_PREFIX} Retry timer dừng (HWND hợp lệ).");
+            }
+        }
+
+        // ─── Private: Placeholder icon ────────────────────────────────────────
+
+        private static Bitmap CreatePlaceholderIcon(int size)
+        {
+            var bmp = new Bitmap(size, size);
+            using (var g = Graphics.FromImage(bmp))
+            {
+                g.Clear(System.Drawing.Color.FromArgb(0, 120, 212));
                 float fontSize = size * 0.3f;
-                using (var font = new System.Drawing.Font("Segoe UI", fontSize, System.Drawing.FontStyle.Bold, System.Drawing.GraphicsUnit.Pixel))
+                using (var font = new System.Drawing.Font("Segoe UI", fontSize, FontStyle.Bold, GraphicsUnit.Pixel))
                 using (var brush = new System.Drawing.SolidBrush(System.Drawing.Color.White))
                 {
                     var sf = new System.Drawing.StringFormat
@@ -472,42 +529,31 @@ namespace SymbolReplacer.Controllers
                     g.DrawString("SR", font, brush, new System.Drawing.RectangleF(0, 0, size, size), sf);
                 }
             }
-
-            // Trả về bitmap đã tạo
-            Debug.WriteLine($"[RibbonController] Tạo placeholder icon {size}x{size}.");
             return bmp;
         }
 
         // ─── Event handlers ───────────────────────────────────────────────────
 
-        /// <summary>
-        /// Xử lý khi user click button "Symbol Replacer" trên ribbon.
-        /// Toggle hiện/ẩn DockableWindow.
-        /// </summary>
         private void OnSymbolReplacerButtonExecute(NameValueMap context)
         {
-            // User click button — toggle visibility của dockable window
             Debug.WriteLine($"{LOG_PREFIX} Button click — toggle DockableWindow visibility.");
 
             if (_dockableWindow == null)
             {
-                Debug.WriteLine($"{LOG_PREFIX} LỖI: _dockableWindow là null khi click button.");
+                Debug.WriteLine($"{LOG_PREFIX} LỖI: _dockableWindow null khi click button.");
                 return;
             }
 
             bool newVisibility = !_dockableWindow.Visible;
             _dockableWindow.Visible = newVisibility;
+            _buttonDef.Pressed = newVisibility;
 
             Debug.WriteLine($"{LOG_PREFIX} DockableWindow.Visible = {newVisibility}");
-
-            // Cập nhật trạng thái pressed của button (toggle style)
-            _buttonDef.Pressed = newVisibility;
         }
 
         /// <summary>
-        /// Xử lý khi DockableWindow được show (lần đầu hoặc sau khi ẩn).
-        /// Inventor 2023 API: DockableWindowsEvents.OnShow(DockableWindow, EventTimingEnum, NameValueMap, ref HandlingCodeEnum)
-        /// Dùng để embed WinForms panel khi HWND lần đầu có sẵn, và re-attach sizer.
+        /// Gọi khi DockableWindow được show — đây là thời điểm HWND chắc chắn tồn tại.
+        /// Embed WPF panel nếu chưa làm, hoặc resize nếu đã embed rồi.
         /// </summary>
         private void OnDockableWindowShow(DockableWindow dockableWindow,
                                           EventTimingEnum beforeOrAfter,
@@ -516,32 +562,41 @@ namespace SymbolReplacer.Controllers
         {
             handlingCode = HandlingCodeEnum.kEventNotHandled;
 
-            // Chỉ xử lý cho DockableWindow của addin này, sau khi đã show
             if (dockableWindow == null || dockableWindow.InternalName != DOCKWIN_ID) return;
             if (beforeOrAfter != EventTimingEnum.kAfter) return;
 
-            Debug.WriteLine($"{LOG_PREFIX} OnDockableWindowShow — kiểm tra embed panel.");
+            Debug.WriteLine($"{LOG_PREFIX} OnDockableWindowShow — kiểm tra embed WPF panel.");
 
-            // Nếu panel chưa được embed (HWND=0 lúc tạo), embed bây giờ
-            if (_panel == null || _panel.IsDisposed || _dockWindowSizer == null)
+            if (_hwndSource == null || _panel == null)
             {
-                EmbedWinFormsPanel();
+                // Chưa embed — thực hiện ngay bây giờ khi HWND đã có
+                EmbedWpfPanel();
             }
             else
             {
-                // Panel đã embed, chỉ resize cho khớp kích thước hiện tại
-                int w = dockableWindow.Width;
-                int h = dockableWindow.Height;
-                if (w > 0 && h > 0)
-                    MoveWindow(_panel.Handle, 0, 0, w, h, true);
+                // Đã embed — resize HwndSource theo kích thước thực (dùng Win32 thay Inventor API hay trả 0)
+                int dockHwnd = dockableWindow.HWND;
+                if (dockHwnd != 0)
+                {
+                    RECT r;
+                    if (GetClientRect(new IntPtr(dockHwnd), out r))
+                    {
+                        int w = Math.Max(r.Right - r.Left, 220);
+                        int h = Math.Max(r.Bottom - r.Top, 400);
+                        MoveWindow(_hwndSource.Handle, 0, 0, w, h, true);
+                        _panel.UpdateLayout();
+                        Debug.WriteLine($"{LOG_PREFIX} OnShow resize: {w}×{h}px");
+                    }
+                }
             }
         }
 
-        // ─── Nested class: NativeWindow sizer ────────────────────────────────
+        // ─── Nested class: resize HwndSource khi DockableWindow resize ──────
 
         /// <summary>
-        /// Subclass HWND của DockableWindow để bắt WM_SIZE và resize WinForms panel.
-        /// Inventor 2023 không có OnResize event trên DockableWindow — dùng Win32 thay thế.
+        /// Subclass HWND của DockableWindow để bắt WM_SIZE.
+        /// Khi DockableWindow resize, resize HwndSource (WPF host) theo.
+        /// Dùng WinForms NativeWindow vì không có Inventor resize event.
         /// </summary>
         private sealed class DockWindowSizer : NativeWindow
         {
@@ -550,26 +605,33 @@ namespace SymbolReplacer.Controllers
             [DllImport("user32.dll", SetLastError = true)]
             private static extern bool MoveWindow(IntPtr hWnd, int x, int y, int nWidth, int nHeight, bool bRepaint);
 
-            private readonly SymbolReplacerPanel _panel;
+            private IntPtr _hwndChild;  // HWND của HwndSource (WPF host window)
 
-            public DockWindowSizer(IntPtr hwnd, SymbolReplacerPanel panel)
+            public DockWindowSizer(IntPtr hwndParent, IntPtr hwndChild)
             {
-                _panel = panel;
-                AssignHandle(hwnd);
+                _hwndChild = hwndChild;
+                AssignHandle(hwndParent);
+                Debug.WriteLine($"[DockWindowSizer] Assigned hwndParent={hwndParent}, hwndChild={hwndChild}");
+            }
+
+            /// <summary>Cập nhật HWND của WPF host khi re-embed (ví dụ dispose + tạo lại HwndSource).</summary>
+            public void UpdateChildHandle(IntPtr hwndChild)
+            {
+                _hwndChild = hwndChild;
             }
 
             protected override void WndProc(ref Message m)
             {
                 base.WndProc(ref m);
 
-                if (m.Msg == WM_SIZE && _panel != null && !_panel.IsDisposed)
+                if (m.Msg == WM_SIZE && _hwndChild != IntPtr.Zero)
                 {
-                    // LParam = MAKELPARAM(width, height)
+                    // LParam = MAKELPARAM(new_width, new_height)
                     int width  = (int)(m.LParam.ToInt64() & 0xFFFF);
                     int height = (int)((m.LParam.ToInt64() >> 16) & 0xFFFF);
 
                     if (width > 0 && height > 0)
-                        MoveWindow(_panel.Handle, 0, 0, width, height, true);
+                        MoveWindow(_hwndChild, 0, 0, width, height, true);
                 }
             }
         }

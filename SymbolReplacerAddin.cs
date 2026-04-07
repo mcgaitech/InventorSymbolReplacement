@@ -25,13 +25,20 @@ namespace SymbolReplacer
         private Inventor.Application _app;
 
         // Services
-        private IConfigService    _configService;
-        private ILibraryService   _libraryService;
-        private IThumbnailService _thumbnailService;
+        private IConfigService       _configService;
+        private ILibraryService      _libraryService;
+        private IThumbnailService    _thumbnailService;
+        private ISymbolReplaceService _symbolReplaceService;
 
         // Controllers
-        private RibbonController   _ribbonController;
-        private PaletteController  _paletteController;
+        private RibbonController      _ribbonController;
+        private PaletteController     _paletteController;
+        private InteractionController _interactionController;
+        private ReplaceController     _replaceController;
+
+        // ApplicationEvents — giữ reference tránh GC thu dọn
+        private ApplicationEvents _appEvents;
+        private bool _ribbonUICreated = false;
 
         // ─── ApplicationAddInServer interface ────────────────────────────────
 
@@ -51,30 +58,38 @@ namespace SymbolReplacer
                 Debug.WriteLine($"{LOG_PREFIX} Inventor version: {_app.SoftwareVersion.DisplayVersion}");
 
                 // ── DI: Khởi tạo Services ──
-                _configService    = new ConfigService();
-                _libraryService   = new LibraryService(_app);
-                _thumbnailService = new ThumbnailService();
+                _configService        = new ConfigService();
+                _libraryService       = new LibraryService(_app);
+                _thumbnailService     = new ThumbnailService();
+                _symbolReplaceService = new SymbolReplaceService(_app);
                 Debug.WriteLine($"{LOG_PREFIX} Services đã khởi tạo.");
 
                 // ── DI: Khởi tạo Controllers ──
-                _ribbonController  = new RibbonController(_app);
-                _paletteController = new PaletteController(
+                _ribbonController      = new RibbonController(_app);
+                _paletteController     = new PaletteController(
+                    _app,
                     _libraryService,
                     _thumbnailService,
                     _configService);
+                _interactionController = new InteractionController(_app);
+                _replaceController     = new ReplaceController(
+                    _app,
+                    _symbolReplaceService,
+                    _interactionController,
+                    _paletteController);
                 Debug.WriteLine($"{LOG_PREFIX} Controllers đã khởi tạo.");
+
+                // Đăng ký ApplicationEvents để retry khi Drawing document được mở
+                // (cần lưu reference — nếu là local var sẽ bị GC thu dọn)
+                _appEvents = _app.ApplicationEvents;
+                _appEvents.OnActivateDocument += OnActivateDocument;
+                Debug.WriteLine($"{LOG_PREFIX} Đã đăng ký ApplicationEvents.OnActivateDocument.");
 
                 if (firstTime)
                 {
-                    // Tạo Ribbon UI và DockableWindow (embed panel)
-                    _ribbonController.CreateRibbonUI();
-                    Debug.WriteLine($"{LOG_PREFIX} Ribbon UI đã được tạo.");
-
-                    // Gán panel cho PaletteController và load library ban đầu
-                    // Panel luôn được tạo trong CreateRibbonUI() (dù HWND=0 hay không)
-                    _paletteController.SetPanel(_ribbonController.Panel);
-                    _paletteController.Initialize();
-                    Debug.WriteLine($"{LOG_PREFIX} PaletteController đã Initialize.");
+                    // Thử tạo Ribbon UI ngay lúc startup
+                    // Nếu Drawing ribbon chưa có (chưa mở file .idw), sẽ retry trong OnActivateDocument
+                    TryCreateRibbonUIAndWire();
                 }
                 else
                 {
@@ -85,16 +100,72 @@ namespace SymbolReplacer
                     // Re-attach panel (đã tồn tại từ session trước)
                     _paletteController.SetPanel(_ribbonController.Panel);
                     _paletteController.Initialize();
+                    _replaceController.SetPanel(_ribbonController.Panel);
+                    _ribbonUICreated = true;
+                    Debug.WriteLine($"{LOG_PREFIX} Re-wire hoàn tất.");
                 }
 
                 Debug.WriteLine($"{LOG_PREFIX} ===== Addin kích hoạt THÀNH CÔNG =====");
             }
             catch (Exception ex)
             {
+                // KHÔNG re-throw — nếu Activate() throws ra ngoài, Inventor không gọi Deactivate()
+                // → COM objects leak → "TerminateProcess: N AddIn objects not released" → Inventor crash.
+                // Log lỗi và để Inventor tiếp tục (addin sẽ bị disabled nhưng Inventor không crash).
                 Debug.WriteLine($"{LOG_PREFIX} LỖI NGHIÊM TRỌNG khi kích hoạt: {ex.Message}");
                 Debug.WriteLine($"{LOG_PREFIX} Stack trace:\n{ex.StackTrace}");
-                throw;
             }
+        }
+
+        /// <summary>
+        /// Thử tạo Ribbon UI và wire controllers vào panel.
+        /// Có thể thất bại nếu Drawing ribbon chưa có (chưa mở file .idw) — khi đó không làm gì.
+        /// </summary>
+        private void TryCreateRibbonUIAndWire()
+        {
+            if (_ribbonUICreated) return;
+
+            try
+            {
+                _ribbonController.CreateRibbonUI();
+
+                // Nếu CreateRibbonUI() thành công thì Panel sẽ khác null
+                if (_ribbonController.Panel == null)
+                {
+                    Debug.WriteLine($"{LOG_PREFIX} Drawing ribbon chưa sẵn sàng — sẽ retry khi mở .idw.");
+                    return;
+                }
+
+                _paletteController.SetPanel(_ribbonController.Panel);
+                _paletteController.Initialize();
+                _replaceController.SetPanel(_ribbonController.Panel);
+                _ribbonUICreated = true;
+                Debug.WriteLine($"{LOG_PREFIX} Ribbon UI + Panel wiring THÀNH CÔNG.");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"{LOG_PREFIX} LỖI TryCreateRibbonUIAndWire: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Gọi khi user activate bất kỳ document.
+        /// Nếu là DrawingDocument và ribbon UI chưa được tạo, tạo ngay bây giờ.
+        /// </summary>
+        private void OnActivateDocument(_Document documentObject,
+                                        EventTimingEnum beforeOrAfter,
+                                        NameValueMap context,
+                                        out HandlingCodeEnum handlingCode)
+        {
+            handlingCode = HandlingCodeEnum.kEventNotHandled;
+
+            // Chỉ xử lý sau khi activate và chỉ khi chưa tạo ribbon UI
+            if (beforeOrAfter != EventTimingEnum.kAfter) return;
+            if (_ribbonUICreated) return;
+            if (!(documentObject is DrawingDocument)) return;
+
+            Debug.WriteLine($"{LOG_PREFIX} Drawing document được activate — thử tạo Ribbon UI...");
+            TryCreateRibbonUIAndWire();
         }
 
         /// <summary>
@@ -104,29 +175,27 @@ namespace SymbolReplacer
         {
             Debug.WriteLine($"{LOG_PREFIX} ===== Bắt đầu tắt addin =====");
 
+            // Mỗi bước cleanup độc lập — lỗi 1 bước không chặn bước khác
             try
             {
-                // Dọn dẹp PaletteController (dispose models, xóa cache, đóng library)
-                _paletteController?.Cleanup();
-                Debug.WriteLine($"{LOG_PREFIX} PaletteController đã cleanup.");
-
-                // Dọn dẹp Ribbon và DockableWindow
-                _ribbonController?.Cleanup();
-                Debug.WriteLine($"{LOG_PREFIX} RibbonController đã cleanup.");
-
-                // Giải phóng references
-                _app = null;
-
-                // Ép GC thu dọn COM objects
-                GC.Collect();
-                GC.WaitForPendingFinalizers();
-
-                Debug.WriteLine($"{LOG_PREFIX} ===== Addin tắt THÀNH CÔNG =====");
+                if (_appEvents != null)
+                    _appEvents.OnActivateDocument -= OnActivateDocument;
             }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"{LOG_PREFIX} LỖI khi tắt addin: {ex.Message}");
-            }
+            catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI detach AppEvents: {ex.Message}"); }
+
+            try { _replaceController?.Cleanup(); }
+            catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI ReplaceController.Cleanup: {ex.Message}"); }
+
+            try { _paletteController?.Cleanup(); }
+            catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI PaletteController.Cleanup: {ex.Message}"); }
+
+            try { _ribbonController?.Cleanup(); }
+            catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI RibbonController.Cleanup: {ex.Message}"); }
+
+            _appEvents = null;
+            _app = null;
+
+            Debug.WriteLine($"{LOG_PREFIX} ===== Addin tắt THÀNH CÔNG =====");
         }
 
         /// <summary>Không dùng trong addin này.</summary>

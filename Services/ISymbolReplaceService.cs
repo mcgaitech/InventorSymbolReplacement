@@ -26,5 +26,13 @@ namespace SymbolReplacer.Services
         /// Toàn bộ nằm trong 1 Transaction → 1 Undo step.
         /// </summary>
         int ReplaceAllInDocument(DrawingDocument doc, SketchedSymbolDefinition oldDef, SketchedSymbolDefinition newDef);
+
+        /// <summary>
+        /// Insert một instance mới của definition vào sheet tại vị trí chỉ định.
+        /// rotation tính bằng radian, scale là hệ số tỷ lệ.
+        /// Tạo 1 Transaction → 1 Undo step.
+        /// </summary>
+        bool InsertSymbol(Sheet sheet, SketchedSymbolDefinition definition, Point2d position,
+                          double rotation = 0.0, double scale = 1.0);
     }
 }

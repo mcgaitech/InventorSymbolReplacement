@@ -1,0 +1,462 @@
+<UserControl x:Class="SymbolReplacer.Views.SymbolReplacerPanel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Background="#FFF0F0F0"
+             FontFamily="Segoe UI"
+             FontSize="11"
+             Foreground="#FF3C3C3C"
+             MinWidth="220">
+
+    <UserControl.Resources>
+
+        <!-- ══ Grid item DataTemplate (default) ══════════════════════════ -->
+        <DataTemplate x:Key="GridItemTemplate">
+            <StackPanel Width="88" VerticalAlignment="Top">
+                <Border BorderThickness="1" BorderBrush="#FFE0E0E0" Background="#FFF5F5F5">
+                    <Image Source="{Binding ImageSource}"
+                           Width="80" Height="80"
+                           Stretch="Uniform"
+                           RenderOptions.BitmapScalingMode="HighQuality"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center"/>
+                </Border>
+                <TextBlock Text="{Binding Name}"
+                           FontSize="9"
+                           TextWrapping="Wrap"
+                           TextAlignment="Center"
+                           MaxHeight="30"
+                           Foreground="#FF3C3C3C"
+                           HorizontalAlignment="Center"
+                           Margin="0,3,0,0"/>
+            </StackPanel>
+        </DataTemplate>
+
+        <!-- ══ List item DataTemplate ════════════════════════════════════ -->
+        <DataTemplate x:Key="ListItemTemplate">
+            <DockPanel Height="44" VerticalAlignment="Center">
+                <Border DockPanel.Dock="Left"
+                        BorderThickness="1" BorderBrush="#FFE0E0E0"
+                        Background="#FFF5F5F5"
+                        Width="40" Height="40"
+                        Margin="0,0,8,0">
+                    <Image Source="{Binding ImageSource}"
+                           Width="36" Height="36"
+                           Stretch="Uniform"
+                           RenderOptions.BitmapScalingMode="HighQuality"
+                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+                <TextBlock Text="{Binding Name}"
+                           FontSize="10"
+                           VerticalAlignment="Center"
+                           TextWrapping="NoWrap"
+                           TextTrimming="CharacterEllipsis"
+                           Foreground="#FF3C3C3C"/>
+            </DockPanel>
+        </DataTemplate>
+
+        <!-- ══ Grid items panel template ══════════════════════════════════ -->
+        <ItemsPanelTemplate x:Key="GridPanel">
+            <WrapPanel Orientation="Horizontal" Margin="4"/>
+        </ItemsPanelTemplate>
+
+        <!-- ══ List items panel template ══════════════════════════════════ -->
+        <ItemsPanelTemplate x:Key="ListPanel">
+            <VirtualizingStackPanel/>
+        </ItemsPanelTemplate>
+
+        <!-- ══ View-toggle RadioButton style (shared) ════════════════════ -->
+        <Style x:Key="ViewToggleStyle" TargetType="RadioButton">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border x:Name="bd"
+                                Background="Transparent"
+                                BorderBrush="#FFB4B4B4"
+                                BorderThickness="1"
+                                CornerRadius="2"
+                                Padding="4,1"
+                                Cursor="Hand">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="bd" Property="Background"   Value="#FF0078D4"/>
+                                <Setter TargetName="bd" Property="BorderBrush"  Value="#FF0078D4"/>
+                            </Trigger>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsMouseOver" Value="True"/>
+                                    <Condition Property="IsChecked"   Value="False"/>
+                                </MultiTrigger.Conditions>
+                                <Setter TargetName="bd" Property="Background" Value="#FFEBF3FF"/>
+                            </MultiTrigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+    </UserControl.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>   <!-- 0: Library source header -->
+            <RowDefinition Height="Auto"/>   <!-- 1: Search bar + view toggle -->
+            <RowDefinition Height="*"/>      <!-- 2: Symbol grid / list -->
+            <RowDefinition Height="Auto"/>   <!-- 3: Properties panel -->
+            <RowDefinition Height="Auto"/>   <!-- 4: Replace / Scan actions -->
+            <RowDefinition Height="Auto"/>   <!-- 5: Status bar -->
+        </Grid.RowDefinitions>
+
+        <!-- ═══════════════════════════════════════════════════════════════ -->
+        <!-- Row 0: Library Source Header — editable path TextBox            -->
+        <!-- ═══════════════════════════════════════════════════════════════ -->
+        <Border Grid.Row="0"
+                Background="#FFD6D6D6"
+                BorderThickness="0,0,0,1"
+                BorderBrush="#FFB4B4B4"
+                Padding="8,5">
+            <DockPanel>
+                <Button x:Name="btnChangeLibrary"
+                        DockPanel.Dock="Right"
+                        Content="⚙"
+                        Width="22" Height="22"
+                        Margin="6,0,0,0"
+                        ToolTip="Browse for library .idw file"
+                        Cursor="Hand"
+                        Click="BtnChangeLibrary_Click"
+                        Background="Transparent"
+                        BorderBrush="#FFB4B4B4"
+                        BorderThickness="1"
+                        FontSize="12"
+                        VerticalContentAlignment="Center"
+                        HorizontalContentAlignment="Center"/>
+                <StackPanel VerticalAlignment="Center" DockPanel.Dock="Left">
+                    <TextBlock Text="LIBRARY SOURCE"
+                               FontSize="9"
+                               FontWeight="Bold"
+                               Foreground="#FF646464"/>
+                    <!-- Editable path — type/paste path + Enter to load -->
+                    <TextBox x:Name="txtLibraryPath"
+                             Text=""
+                             FontSize="10"
+                             Background="Transparent"
+                             BorderThickness="0"
+                             Padding="0,1"
+                             Foreground="#FF3C3C3C"
+                             ToolTip="Type or paste a file/folder path and press Enter to load"
+                             KeyDown="TxtLibraryPath_KeyDown"/>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <!-- ═══════════════════════════════════════════════════════════════ -->
+        <!-- Row 1: Search Bar + Grid/List View Toggle                        -->
+        <!-- ═══════════════════════════════════════════════════════════════ -->
+        <Border Grid.Row="1"
+                Background="#FFE8E8E8"
+                BorderThickness="0,0,0,1"
+                BorderBrush="#FFB4B4B4"
+                Padding="6,4">
+            <DockPanel>
+                <!-- View toggle on right -->
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="4,0,0,0">
+                    <RadioButton x:Name="rbGridView"
+                                 IsChecked="True"
+                                 GroupName="ViewMode"
+                                 ToolTip="Grid view"
+                                 Style="{StaticResource ViewToggleStyle}"
+                                 Checked="ViewMode_Changed"
+                                 VerticalAlignment="Center"
+                                 Margin="0,0,2,0">
+                        <TextBlock Text="⊞" FontSize="13" Foreground="White"/>
+                    </RadioButton>
+                    <RadioButton x:Name="rbListView"
+                                 GroupName="ViewMode"
+                                 ToolTip="List view"
+                                 Style="{StaticResource ViewToggleStyle}"
+                                 Checked="ViewMode_Changed"
+                                 VerticalAlignment="Center">
+                        <TextBlock Text="☰" FontSize="13" Foreground="#FF3C3C3C"/>
+                    </RadioButton>
+                </StackPanel>
+
+                <!-- Search box (fills remaining space) -->
+                <TextBlock DockPanel.Dock="Left"
+                           Text="🔍"
+                           VerticalAlignment="Center"
+                           Margin="0,0,4,0"
+                           Foreground="#FF646464"
+                           FontSize="11"/>
+                <TextBox x:Name="txtSearch"
+                         BorderThickness="1"
+                         BorderBrush="#FFB4B4B4"
+                         Background="White"
+                         Foreground="#FF999999"
+                         Padding="3,2"
+                         VerticalContentAlignment="Center"
+                         FontSize="10"
+                         TextChanged="TxtSearch_TextChanged"
+                         GotFocus="TxtSearch_GotFocus"
+                         LostFocus="TxtSearch_LostFocus"
+                         Tag="Search..."/>
+            </DockPanel>
+        </Border>
+
+        <!-- ═══════════════════════════════════════════════════════════════ -->
+        <!-- Row 2: Symbol Grid / List (ItemTemplate/Panel switched in code)  -->
+        <!-- ═══════════════════════════════════════════════════════════════ -->
+        <ListBox x:Name="listSymbols"
+                 Grid.Row="2"
+                 Background="White"
+                 BorderThickness="0"
+                 HorizontalContentAlignment="Left"
+                 VirtualizingPanel.IsVirtualizing="False"
+                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                 SelectionMode="Single"
+                 ItemTemplate="{StaticResource GridItemTemplate}"
+                 ItemsPanel="{StaticResource GridPanel}"
+                 SelectionChanged="ListSymbols_SelectionChanged">
+
+            <ListBox.ItemContainerStyle>
+                <Style TargetType="ListBoxItem">
+                    <Setter Property="Padding"         Value="4"/>
+                    <Setter Property="Margin"          Value="2"/>
+                    <Setter Property="Background"      Value="White"/>
+                    <Setter Property="BorderBrush"     Value="#FFD6D6D6"/>
+                    <Setter Property="BorderThickness" Value="1"/>
+                    <Setter Property="Cursor"          Value="Hand"/>
+                    <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+                    <Setter Property="Template">
+                        <Setter.Value>
+                            <ControlTemplate TargetType="ListBoxItem">
+                                <Border x:Name="bdr"
+                                        Background="{TemplateBinding Background}"
+                                        BorderBrush="{TemplateBinding BorderBrush}"
+                                        BorderThickness="{TemplateBinding BorderThickness}"
+                                        Padding="{TemplateBinding Padding}"
+                                        CornerRadius="3">
+                                    <ContentPresenter/>
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsSelected" Value="True">
+                                        <Setter TargetName="bdr" Property="Background"      Value="#FFD2E5FF"/>
+                                        <Setter TargetName="bdr" Property="BorderBrush"     Value="#FF0078D4"/>
+                                        <Setter TargetName="bdr" Property="BorderThickness" Value="2"/>
+                                    </Trigger>
+                                    <MultiTrigger>
+                                        <MultiTrigger.Conditions>
+                                            <Condition Property="IsMouseOver" Value="True"/>
+                                            <Condition Property="IsSelected"  Value="False"/>
+                                        </MultiTrigger.Conditions>
+                                        <Setter TargetName="bdr" Property="Background" Value="#FFEBF3FF"/>
+                                    </MultiTrigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Setter.Value>
+                    </Setter>
+                </Style>
+            </ListBox.ItemContainerStyle>
+        </ListBox>
+
+        <!-- ═══════════════════════════════════════════════════════════════ -->
+        <!-- Row 3: Properties Panel                                          -->
+        <!-- ═══════════════════════════════════════════════════════════════ -->
+        <Border Grid.Row="3"
+                Background="#FFD6D6D6"
+                BorderThickness="0,1,0,1"
+                BorderBrush="#FFB4B4B4"
+                Padding="8,6">
+            <StackPanel>
+                <TextBlock Text="PROPERTIES"
+                           FontSize="9"
+                           FontWeight="Bold"
+                           Foreground="#FF646464"
+                           Margin="0,0,0,4"/>
+
+                <!-- Symbol name -->
+                <TextBlock x:Name="txtSymbolName"
+                           Text="(select a symbol)"
+                           FontWeight="Bold"
+                           FontSize="10"
+                           TextTrimming="CharacterEllipsis"
+                           Margin="0,0,0,6"/>
+
+                <!-- Scale + Rotate -->
+                <Grid Margin="0,0,0,5">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Text="Scale:"
+                               VerticalAlignment="Center" Margin="0,0,4,0" FontSize="10"/>
+                    <TextBox Grid.Column="1" x:Name="txtScale"
+                             Text="1.000"
+                             FontSize="10"
+                             Padding="3,1"
+                             Margin="0,0,8,0"
+                             BorderBrush="#FFB4B4B4"
+                             VerticalContentAlignment="Center"/>
+                    <TextBlock Grid.Column="2" Text="Rotate°:"
+                               VerticalAlignment="Center" Margin="0,0,4,0" FontSize="10"/>
+                    <TextBox Grid.Column="3" x:Name="txtRotate"
+                             Text="0.0"
+                             FontSize="10"
+                             Padding="3,1"
+                             BorderBrush="#FFB4B4B4"
+                             VerticalContentAlignment="Center"/>
+                </Grid>
+
+                <!-- Checkboxes row 1 -->
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,2">
+                    <CheckBox x:Name="chkClipping" Content="Clipping"
+                              FontSize="10" Margin="0,0,14,0"/>
+                    <CheckBox x:Name="chkStatic"   Content="Static"
+                              FontSize="10"/>
+                </StackPanel>
+
+                <!-- Checkboxes row 2 -->
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                    <CheckBox x:Name="chkLeader" Content="Leader"
+                              FontSize="10" Margin="0,0,14,0"
+                              Checked="ChkLeader_Changed" Unchecked="ChkLeader_Changed"/>
+                    <CheckBox x:Name="chkLeaderVisible" Content="Leader Visible"
+                              FontSize="10" IsEnabled="False"/>
+                </StackPanel>
+
+                <!-- Preview image -->
+                <Border BorderThickness="1" BorderBrush="#FFB4B4B4"
+                        Background="White" Width="86" Height="86"
+                        HorizontalAlignment="Center">
+                    <Image x:Name="imgPreview"
+                           Width="80" Height="80"
+                           Stretch="Uniform"
+                           RenderOptions.BitmapScalingMode="HighQuality"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center"/>
+                </Border>
+            </StackPanel>
+        </Border>
+
+        <!-- ═══════════════════════════════════════════════════════════════ -->
+        <!-- Row 4: Replace / Scan Actions                                    -->
+        <!-- ═══════════════════════════════════════════════════════════════ -->
+        <Border Grid.Row="4"
+                Background="#FFD6D6D6"
+                BorderThickness="0,0,0,1"
+                BorderBrush="#FFB4B4B4"
+                Padding="8,6">
+            <StackPanel>
+                <TextBlock Text="REPLACE"
+                           FontSize="9"
+                           FontWeight="Bold"
+                           Foreground="#FF646464"
+                           Margin="0,0,0,4"/>
+
+                <!-- Replace (Pick Mode) — primary action -->
+                <Button x:Name="btnReplace"
+                        Content="🔄  Replace  (Pick Mode)"
+                        Height="28"
+                        Margin="0,0,0,4"
+                        IsEnabled="False"
+                        Cursor="Hand"
+                        Click="BtnReplace_Click"
+                        FontSize="10"
+                        Foreground="White"
+                        Background="#FF0078D4"
+                        BorderThickness="0">
+                    <Button.Style>
+                        <Style TargetType="Button">
+                            <Setter Property="Background"   Value="#FF0078D4"/>
+                            <Setter Property="Foreground"   Value="White"/>
+                            <Setter Property="BorderThickness" Value="0"/>
+                            <Setter Property="Template">
+                                <Setter.Value>
+                                    <ControlTemplate TargetType="Button">
+                                        <Border Background="{TemplateBinding Background}"
+                                                BorderBrush="{TemplateBinding BorderBrush}"
+                                                BorderThickness="{TemplateBinding BorderThickness}"
+                                                CornerRadius="2">
+                                            <ContentPresenter HorizontalAlignment="Center"
+                                                              VerticalAlignment="Center"/>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter Property="Background" Value="#FF006BBD"/>
+                                            </Trigger>
+                                            <Trigger Property="IsEnabled" Value="False">
+                                                <Setter Property="Background" Value="#FFAAAAAA"/>
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Setter.Value>
+                            </Setter>
+                        </Style>
+                    </Button.Style>
+                </Button>
+
+                <!-- Replace All — single button that opens dropdown menu -->
+                <Button x:Name="btnReplaceAll"
+                        Content="Replace All  ▾"
+                        Height="24"
+                        Margin="0,0,0,6"
+                        IsEnabled="False"
+                        Cursor="Hand"
+                        FontSize="10"
+                        Click="BtnReplaceAll_Click">
+                    <Button.ContextMenu>
+                        <ContextMenu>
+                            <MenuItem Header="Current Sheet Only"
+                                      Click="BtnReplaceAllCurrent_Click"/>
+                            <MenuItem Header="All Sheets"
+                                      Click="BtnReplaceAllDoc_Click"/>
+                        </ContextMenu>
+                    </Button.ContextMenu>
+                </Button>
+
+                <Separator Margin="0,0,0,6" Background="#FFB4B4B4"/>
+
+                <TextBlock Text="SCAN"
+                           FontSize="9"
+                           FontWeight="Bold"
+                           Foreground="#FF646464"
+                           Margin="0,0,0,4"/>
+
+                <!-- Scan Sheet — highlight symbols not in palette -->
+                <Button x:Name="btnScanSheet"
+                        Content="🔍  Scan Sheet"
+                        Height="24"
+                        Margin="0,0,0,3"
+                        Cursor="Hand"
+                        FontSize="10"
+                        ToolTip="Highlight symbols on the active sheet that are NOT in this palette"
+                        Click="BtnScanSheet_Click"/>
+
+                <!-- Clear Highlight -->
+                <Button x:Name="btnClearHighlight"
+                        Content="✖  Clear Highlight"
+                        Height="22"
+                        IsEnabled="False"
+                        Cursor="Hand"
+                        FontSize="10"
+                        Click="BtnClearHighlight_Click"/>
+            </StackPanel>
+        </Border>
+
+        <!-- ═══════════════════════════════════════════════════════════════ -->
+        <!-- Row 5: Status Bar                                                -->
+        <!-- ═══════════════════════════════════════════════════════════════ -->
+        <Border Grid.Row="5"
+                Background="#FFD6D6D6"
+                Padding="8,4">
+            <TextBlock x:Name="txtStatus"
+                       Text="Ready"
+                       FontSize="10"
+                       Foreground="#FF3C3C3C"
+                       TextWrapping="Wrap"/>
+        </Border>
+
+    </Grid>
+</UserControl>

@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.IO;
+using System.IO;  // Directory, Path — aliased below to avoid conflict with Inventor.Path
 using Inventor;
 using SystemFile = System.IO.File;
+using SystemPath = System.IO.Path;
+using SystemDir  = System.IO.Directory;
 
 namespace SymbolReplacer.Services
 {
@@ -63,15 +65,15 @@ namespace SymbolReplacer.Services
             // Xác định danh sách file .idw cần đọc
             var idwFiles = new List<string>();
 
-            if (Directory.Exists(libraryPath))
+            if (SystemDir.Exists(libraryPath))
             {
                 // Là folder → quét tất cả .idw trong folder (không đệ quy)
-                var files = Directory.GetFiles(libraryPath, "*.idw", SearchOption.TopDirectoryOnly);
+                var files = SystemDir.GetFiles(libraryPath, "*.idw", SearchOption.TopDirectoryOnly);
                 idwFiles.AddRange(files);
                 Debug.WriteLine($"{LOG_PREFIX} Folder: tìm thấy {files.Length} file .idw.");
             }
             else if (SystemFile.Exists(libraryPath) &&
-                     string.Equals(Path.GetExtension(libraryPath), ".idw",
+                     string.Equals(SystemPath.GetExtension(libraryPath), ".idw",
                          StringComparison.OrdinalIgnoreCase))
             {
                 // Là file .idw cụ thể
@@ -123,7 +125,7 @@ namespace SymbolReplacer.Services
 
         private void LoadFromFile(string filePath, List<SketchedSymbolDefinition> result)
         {
-            Debug.WriteLine($"{LOG_PREFIX} LoadFromFile: {Path.GetFileName(filePath)}");
+            Debug.WriteLine($"{LOG_PREFIX} LoadFromFile: {SystemPath.GetFileName(filePath)}");
             Document doc = null;
 
             try
@@ -154,14 +156,14 @@ namespace SymbolReplacer.Services
                 }
 
                 var defs = drawDoc.SketchedSymbolDefinitions;
-                Debug.WriteLine($"{LOG_PREFIX}   {defs.Count} symbols trong {Path.GetFileName(filePath)}.");
+                Debug.WriteLine($"{LOG_PREFIX}   {defs.Count} symbols trong {SystemPath.GetFileName(filePath)}.");
 
                 foreach (SketchedSymbolDefinition def in defs)
                     result.Add(def);
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"{LOG_PREFIX} LỖI LoadFromFile '{Path.GetFileName(filePath)}': {ex.Message}");
+                Debug.WriteLine($"{LOG_PREFIX} LỖI LoadFromFile '{SystemPath.GetFileName(filePath)}': {ex.Message}");
             }
         }
 

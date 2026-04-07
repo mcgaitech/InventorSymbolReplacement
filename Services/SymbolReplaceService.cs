@@ -55,7 +55,7 @@ namespace SymbolReplacer.Services
                 return false;
             }
 
-            var tx = _app.TransactionManager.StartTransaction(doc, "Replace Symbol");
+            var tx = _app.TransactionManager.StartTransaction((_Document)doc, "Replace Symbol");
             try
             {
                 ReplaceOne(sheet, oldSymbol, newDef);
@@ -94,7 +94,7 @@ namespace SymbolReplacer.Services
                 return 0;
             }
 
-            var tx = _app.TransactionManager.StartTransaction(doc, "Replace All Symbols (Sheet)");
+            var tx = _app.TransactionManager.StartTransaction((_Document)doc, "Replace All Symbols (Sheet)");
             int count = 0;
             try
             {
@@ -145,7 +145,7 @@ namespace SymbolReplacer.Services
                 return 0;
             }
 
-            var tx = _app.TransactionManager.StartTransaction(doc, "Replace All Symbols (Document)");
+            var tx = _app.TransactionManager.StartTransaction((_Document)doc, "Replace All Symbols (Document)");
             int count = 0;
             try
             {
@@ -173,6 +173,41 @@ namespace SymbolReplacer.Services
             return count;
         }
 
+        public bool InsertSymbol(Sheet sheet, SketchedSymbolDefinition definition, Point2d position,
+                                 double rotation = 0.0, double scale = 1.0)
+        {
+            if (sheet      == null) throw new ArgumentNullException(nameof(sheet));
+            if (definition == null) throw new ArgumentNullException(nameof(definition));
+            if (position   == null) throw new ArgumentNullException(nameof(position));
+
+            Debug.WriteLine($"{LOG_PREFIX} InsertSymbol: '{definition.Name}' tại ({position.X:F3},{position.Y:F3}) rot={rotation:F3}rad scale={scale:F3}");
+
+            var doc = sheet.Parent as DrawingDocument;
+            if (doc == null)
+            {
+                Debug.WriteLine($"{LOG_PREFIX} LỖI: Không lấy được DrawingDocument từ sheet.");
+                return false;
+            }
+
+            // Resolve definition trong active document (tránh cross-doc reference)
+            var resolvedDef = ResolveDefinitionInDocument(doc, definition);
+
+            var tx = _app.TransactionManager.StartTransaction((_Document)doc, "Insert Symbol");
+            try
+            {
+                var newSym = sheet.SketchedSymbols.Add(resolvedDef, position, rotation, scale, Type.Missing);
+                tx.End();
+                Debug.WriteLine($"{LOG_PREFIX} InsertSymbol THÀNH CÔNG: '{newSym.Name}'");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"{LOG_PREFIX} LỖI InsertSymbol: {ex.Message}");
+                try { tx.Abort(); } catch { }
+                return false;
+            }
+        }
+
         // ─── Core replace logic ───────────────────────────────────────────────
 
         /// <summary>
@@ -182,25 +217,39 @@ namespace SymbolReplacer.Services
         private void ReplaceOne(Sheet sheet, SketchedSymbol old, SketchedSymbolDefinition newDef)
         {
             // ── Bước 1: Snapshot toàn bộ properties cần preserve ──
-            var pos      = old.Position;           // Point2d
-            double rot   = old.Rotation;           // radian
-            double scale = old.Scale;              // factor
-            var layer    = old.Layer;              // Layer reference
+            // QUAN TRỌNG: Lưu X/Y là double primitive, KHÔNG giữ COM object Point2d.
+            // Sau khi old.Delete(), COM reference của Point2d sẽ bị stale → E_INVALIDARG.
+            double posX   = old.Position.X;
+            double posY   = old.Position.Y;
+            double rot    = old.Rotation;
+            double scale  = old.Scale;
+            var layer     = old.Layer;
             bool isStatic = old.Static;
 
-            // Snapshot attribute values (match by TextBox name sau khi insert)
+            // Snapshot attribute values trước khi xóa
             var attrSnapshot = SnapshotPromptText(old);
 
-            Debug.WriteLine($"{LOG_PREFIX}   Snapshot: pos=({pos.X:F3},{pos.Y:F3}) rot={rot:F3} scale={scale:F3} attrs={attrSnapshot.Count}");
+            Debug.WriteLine($"{LOG_PREFIX}   Snapshot: pos=({posX:F3},{posY:F3}) rot={rot:F3} scale={scale:F3} attrs={attrSnapshot.Count}");
 
-            // ── Bước 2: Delete old instance ──
+            // ── Bước 2: Resolve definition trong document hiện tại ──
+            // newDef có thể là từ library document (khác document với sheet).
+            // Inventor yêu cầu definition phải thuộc cùng document với sheet.
+            // → Kiểm tra xem doc hiện tại đã có definition cùng tên chưa.
+            var doc = sheet.Parent as DrawingDocument;
+            var resolvedDef = ResolveDefinitionInDocument(doc, newDef);
+            Debug.WriteLine($"{LOG_PREFIX}   Resolved definition: '{resolvedDef.Name}' (from {(resolvedDef == newDef ? "library" : "active doc")})");
+
+            // ── Bước 3: Delete old instance ──
             old.Delete();
             Debug.WriteLine($"{LOG_PREFIX}   Deleted old instance.");
 
-            // ── Bước 3: Insert new instance với cùng position/rotation/scale ──
+            // ── Bước 4: Tạo Point2d mới từ TransientGeometry (COM object cũ đã stale) ──
+            var freshPos = _app.TransientGeometry.CreatePoint2d(posX, posY);
+
+            // ── Bước 5: Insert new instance với cùng position/rotation/scale ──
             var newSym = sheet.SketchedSymbols.Add(
-                newDef,
-                pos,
+                resolvedDef,
+                freshPos,
                 rot,
                 scale,
                 Type.Missing);  // PromptStrings = không cần, set sau
@@ -301,6 +350,37 @@ namespace SymbolReplacer.Services
         }
 
         // ─── Private helpers ──────────────────────────────────────────────────
+
+        /// <summary>
+        /// Tìm definition trong document hiện tại theo tên.
+        /// Nếu tìm thấy → trả về definition của document (tránh cross-doc reference).
+        /// Nếu không tìm thấy → trả về definition gốc từ library (Inventor sẽ auto-import).
+        /// </summary>
+        private static SketchedSymbolDefinition ResolveDefinitionInDocument(
+            DrawingDocument doc, SketchedSymbolDefinition libraryDef)
+        {
+            if (doc == null) return libraryDef;
+
+            try
+            {
+                foreach (SketchedSymbolDefinition def in doc.SketchedSymbolDefinitions)
+                {
+                    if (string.Equals(def.Name, libraryDef.Name, StringComparison.OrdinalIgnoreCase))
+                    {
+                        Debug.WriteLine($"[SymbolReplaceService] ResolveDefinition: tìm thấy '{def.Name}' trong active doc.");
+                        return def;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[SymbolReplaceService] ResolveDefinition LỖI: {ex.Message}");
+            }
+
+            // Không có trong active doc → dùng library def (Inventor sẽ tự import)
+            Debug.WriteLine($"[SymbolReplaceService] ResolveDefinition: '{libraryDef.Name}' chưa có trong active doc, dùng library def.");
+            return libraryDef;
+        }
 
         /// <summary>Collect tất cả SketchedSymbol instance matching definition trên sheet.</summary>
         private static List<SketchedSymbol> CollectMatchingSymbols(
