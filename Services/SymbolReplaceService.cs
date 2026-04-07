@@ -41,17 +41,17 @@ namespace SymbolReplacer.Services
 
             Debug.WriteLine($"{LOG_PREFIX} ReplaceSingle: '{oldSymbol.Name}' → '{newDef.Name}'");
 
-            var doc = oldSymbol.Parent?.Parent as DrawingDocument;
-            if (doc == null)
-            {
-                Debug.WriteLine($"{LOG_PREFIX} LỖI: Không lấy được DrawingDocument từ symbol.");
-                return false;
-            }
-
-            var sheet = oldSymbol.Parent as Sheet;
+            var sheet = GetSheetFromSymbol(oldSymbol);
             if (sheet == null)
             {
                 Debug.WriteLine($"{LOG_PREFIX} LỖI: Không lấy được Sheet từ symbol.");
+                return false;
+            }
+
+            var doc = sheet.Parent as DrawingDocument;
+            if (doc == null)
+            {
+                Debug.WriteLine($"{LOG_PREFIX} LỖI: Không lấy được DrawingDocument từ sheet.");
                 return false;
             }
 
@@ -219,25 +219,35 @@ namespace SymbolReplacer.Services
             // ── Bước 1: Snapshot toàn bộ properties cần preserve ──
             // QUAN TRỌNG: Lưu X/Y là double primitive, KHÔNG giữ COM object Point2d.
             // Sau khi old.Delete(), COM reference của Point2d sẽ bị stale → E_INVALIDARG.
-            double posX   = old.Position.X;
-            double posY   = old.Position.Y;
-            double rot    = old.Rotation;
-            double scale  = old.Scale;
-            var layer     = old.Layer;
-            bool isStatic = old.Static;
+            double posX  = old.Position.X;
+            double posY  = old.Position.Y;
+            double rot   = old.Rotation;
+            double scale = old.Scale;
+            var layer    = old.Layer;
+
+            // _AttachedEntity: entity mà symbol đang bám theo (DrawingView hoặc geometry).
+            // Đây là nguyên nhân symbol di chuyển cùng view/object khi bị kéo.
+            // Phải snapshot TRƯỚC khi Delete() — COM reference vẫn valid vì entity chưa bị xóa.
+            GeometryIntent attachedEntity = null;
+            try { attachedEntity = old._AttachedEntity; }
+            catch { /* null nếu symbol là floating */ }
+
+            // Static = false: symbol tham gia cập nhật annotation (di chuyển cùng entity)
+            // Static = true : symbol cố định tại sheet coordinates
+            bool isStatic = false;
+            try { isStatic = old.Static; }
+            catch { }
 
             // Snapshot attribute values trước khi xóa
             var attrSnapshot = SnapshotPromptText(old);
 
-            Debug.WriteLine($"{LOG_PREFIX}   Snapshot: pos=({posX:F3},{posY:F3}) rot={rot:F3} scale={scale:F3} attrs={attrSnapshot.Count}");
+            Debug.WriteLine($"{LOG_PREFIX}   Snapshot: pos=({posX:F3},{posY:F3}) rot={rot:F3} scale={scale:F3}" +
+                            $" static={isStatic} hasAttach={attachedEntity != null} attrs={attrSnapshot.Count}");
 
             // ── Bước 2: Resolve definition trong document hiện tại ──
-            // newDef có thể là từ library document (khác document với sheet).
-            // Inventor yêu cầu definition phải thuộc cùng document với sheet.
-            // → Kiểm tra xem doc hiện tại đã có definition cùng tên chưa.
             var doc = sheet.Parent as DrawingDocument;
             var resolvedDef = ResolveDefinitionInDocument(doc, newDef);
-            Debug.WriteLine($"{LOG_PREFIX}   Resolved definition: '{resolvedDef.Name}' (from {(resolvedDef == newDef ? "library" : "active doc")})");
+            Debug.WriteLine($"{LOG_PREFIX}   Resolved definition: '{resolvedDef.Name}'");
 
             // ── Bước 3: Delete old instance ──
             old.Delete();
@@ -246,17 +256,36 @@ namespace SymbolReplacer.Services
             // ── Bước 4: Tạo Point2d mới từ TransientGeometry (COM object cũ đã stale) ──
             var freshPos = _app.TransientGeometry.CreatePoint2d(posX, posY);
 
-            // ── Bước 5: Insert new instance với cùng position/rotation/scale ──
+            // ── Bước 5: Insert new instance ──
             var newSym = sheet.SketchedSymbols.Add(
-                resolvedDef,
-                freshPos,
-                rot,
-                scale,
-                Type.Missing);  // PromptStrings = không cần, set sau
+                resolvedDef, freshPos, rot, scale, Type.Missing);
+            Debug.WriteLine($"{LOG_PREFIX}   Inserted: '{newSym.Name}'.");
 
-            Debug.WriteLine($"{LOG_PREFIX}   Inserted new instance: '{newSym.Name}'.");
+            // ── Bước 6: Restore Static ──
+            // Phải set TRƯỚC _AttachedEntity — nếu Static=true thì attachment bị bỏ qua
+            try { newSym.Static = isStatic; }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"{LOG_PREFIX}   CẢNH BÁO: Không restore Static: {ex.Message}");
+            }
 
-            // ── Bước 4: Restore Layer ──
+            // ── Bước 7: Restore _AttachedEntity ──
+            // Đây là fix chính: symbol mới sẽ di chuyển cùng DrawingView/entity
+            // giống như symbol cũ thay vì bị floating trên sheet.
+            if (attachedEntity != null)
+            {
+                try
+                {
+                    newSym._AttachedEntity = attachedEntity;
+                    Debug.WriteLine($"{LOG_PREFIX}   _AttachedEntity restored → symbol sẽ di chuyển cùng entity.");
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"{LOG_PREFIX}   CẢNH BÁO: Không restore _AttachedEntity: {ex.Message}");
+                }
+            }
+
+            // ── Bước 8: Restore Layer ──
             try
             {
                 if (layer != null)
@@ -264,11 +293,28 @@ namespace SymbolReplacer.Services
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"{LOG_PREFIX}   CẢNH BÁO: Không restore được Layer: {ex.Message}");
+                Debug.WriteLine($"{LOG_PREFIX}   CẢNH BÁO: Không restore Layer: {ex.Message}");
             }
 
-            // ── Bước 5: Copy attribute values (prompt text) ──
+            // ── Bước 9: Copy attribute values (prompt text) ──
             RestorePromptText(newSym, attrSnapshot);
+        }
+
+        // ─── Private: View attachment helpers ────────────────────────────────
+
+        /// <summary>
+        /// Lấy Sheet từ SketchedSymbol.
+        /// Trong Inventor 2023 API, SketchedSymbol.Parent luôn trả về Sheet
+        /// (DrawingView không có collection SketchedSymbols riêng).
+        /// </summary>
+        private static Sheet GetSheetFromSymbol(SketchedSymbol symbol)
+        {
+            try { return symbol.Parent as Sheet; }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"{LOG_PREFIX} LỖI GetSheetFromSymbol: {ex.Message}");
+                return null;
+            }
         }
 
         // ─── Attribute / Prompt text helpers ─────────────────────────────────

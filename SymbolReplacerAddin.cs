@@ -36,8 +36,6 @@ namespace SymbolReplacer
         private InteractionController _interactionController;
         private ReplaceController     _replaceController;
 
-        // ApplicationEvents — giữ reference tránh GC thu dọn
-        private ApplicationEvents _appEvents;
         private bool _ribbonUICreated = false;
 
         // ─── ApplicationAddInServer interface ────────────────────────────────
@@ -79,16 +77,8 @@ namespace SymbolReplacer
                     _paletteController);
                 Debug.WriteLine($"{LOG_PREFIX} Controllers đã khởi tạo.");
 
-                // Đăng ký ApplicationEvents để retry khi Drawing document được mở
-                // (cần lưu reference — nếu là local var sẽ bị GC thu dọn)
-                _appEvents = _app.ApplicationEvents;
-                _appEvents.OnActivateDocument += OnActivateDocument;
-                Debug.WriteLine($"{LOG_PREFIX} Đã đăng ký ApplicationEvents.OnActivateDocument.");
-
                 if (firstTime)
                 {
-                    // Thử tạo Ribbon UI ngay lúc startup
-                    // Nếu Drawing ribbon chưa có (chưa mở file .idw), sẽ retry trong OnActivateDocument
                     TryCreateRibbonUIAndWire();
                 }
                 else
@@ -118,8 +108,7 @@ namespace SymbolReplacer
         }
 
         /// <summary>
-        /// Thử tạo Ribbon UI và wire controllers vào panel.
-        /// Có thể thất bại nếu Drawing ribbon chưa có (chưa mở file .idw) — khi đó không làm gì.
+        /// Tạo Ribbon UI và wire controllers vào panel.
         /// </summary>
         private void TryCreateRibbonUIAndWire()
         {
@@ -128,13 +117,6 @@ namespace SymbolReplacer
             try
             {
                 _ribbonController.CreateRibbonUI();
-
-                // Nếu CreateRibbonUI() thành công thì Panel sẽ khác null
-                if (_ribbonController.Panel == null)
-                {
-                    Debug.WriteLine($"{LOG_PREFIX} Drawing ribbon chưa sẵn sàng — sẽ retry khi mở .idw.");
-                    return;
-                }
 
                 _paletteController.SetPanel(_ribbonController.Panel);
                 _paletteController.Initialize();
@@ -149,26 +131,6 @@ namespace SymbolReplacer
         }
 
         /// <summary>
-        /// Gọi khi user activate bất kỳ document.
-        /// Nếu là DrawingDocument và ribbon UI chưa được tạo, tạo ngay bây giờ.
-        /// </summary>
-        private void OnActivateDocument(_Document documentObject,
-                                        EventTimingEnum beforeOrAfter,
-                                        NameValueMap context,
-                                        out HandlingCodeEnum handlingCode)
-        {
-            handlingCode = HandlingCodeEnum.kEventNotHandled;
-
-            // Chỉ xử lý sau khi activate và chỉ khi chưa tạo ribbon UI
-            if (beforeOrAfter != EventTimingEnum.kAfter) return;
-            if (_ribbonUICreated) return;
-            if (!(documentObject is DrawingDocument)) return;
-
-            Debug.WriteLine($"{LOG_PREFIX} Drawing document được activate — thử tạo Ribbon UI...");
-            TryCreateRibbonUIAndWire();
-        }
-
-        /// <summary>
         /// Inventor gọi Deactivate() khi user tắt addin hoặc đóng Inventor.
         /// </summary>
         public void Deactivate()
@@ -176,13 +138,6 @@ namespace SymbolReplacer
             Debug.WriteLine($"{LOG_PREFIX} ===== Bắt đầu tắt addin =====");
 
             // Mỗi bước cleanup độc lập — lỗi 1 bước không chặn bước khác
-            try
-            {
-                if (_appEvents != null)
-                    _appEvents.OnActivateDocument -= OnActivateDocument;
-            }
-            catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI detach AppEvents: {ex.Message}"); }
-
             try { _replaceController?.Cleanup(); }
             catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI ReplaceController.Cleanup: {ex.Message}"); }
 
@@ -192,7 +147,6 @@ namespace SymbolReplacer
             try { _ribbonController?.Cleanup(); }
             catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI RibbonController.Cleanup: {ex.Message}"); }
 
-            _appEvents = null;
             _app = null;
 
             Debug.WriteLine($"{LOG_PREFIX} ===== Addin tắt THÀNH CÔNG =====");

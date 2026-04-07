@@ -100,6 +100,34 @@ namespace SymbolReplacer.Services
             return result;
         }
 
+        /// <summary>
+        /// Đọc symbols trực tiếp từ DrawingDocument đang mở trong Inventor (không mở file mới).
+        /// Dùng cho tab "Local" trong palette.
+        /// </summary>
+        public IReadOnlyList<SketchedSymbolDefinition> LoadLocalDefinitions(DrawingDocument doc)
+        {
+            var result = new List<SketchedSymbolDefinition>();
+            if (doc == null)
+            {
+                Debug.WriteLine($"{LOG_PREFIX} LoadLocalDefinitions: doc null, bỏ qua.");
+                return result;
+            }
+
+            try
+            {
+                var defs = doc.SketchedSymbolDefinitions;
+                Debug.WriteLine($"{LOG_PREFIX} LoadLocalDefinitions: {defs.Count} symbols từ '{SystemPath.GetFileName(doc.FullFileName)}'.");
+                foreach (SketchedSymbolDefinition def in defs)
+                    result.Add(def);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"{LOG_PREFIX} LỖI LoadLocalDefinitions: {ex.Message}");
+            }
+
+            return result;
+        }
+
         public void CloseLibrary()
         {
             Debug.WriteLine($"{LOG_PREFIX} CloseLibrary ({_openedByUs.Count} docs đã mở).");

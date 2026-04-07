@@ -100,42 +100,67 @@
 
     <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>   <!-- 0: Library source header -->
-            <RowDefinition Height="Auto"/>   <!-- 1: Search bar + view toggle -->
-            <RowDefinition Height="*"/>      <!-- 2: Symbol grid / list -->
-            <RowDefinition Height="Auto"/>   <!-- 3: Properties panel -->
-            <RowDefinition Height="Auto"/>   <!-- 4: Replace / Scan actions -->
-            <RowDefinition Height="Auto"/>   <!-- 5: Status bar -->
+            <RowDefinition Height="Auto"/>        <!-- 0: Library source header -->
+            <RowDefinition Height="Auto"/>        <!-- 1: Search bar + view toggle -->
+            <RowDefinition Height="*" MinHeight="60"/>   <!-- 2: Symbol grid / list -->
+            <RowDefinition Height="Auto"/>        <!-- 3: GridSplitter -->
+            <RowDefinition Height="180" MinHeight="60"/> <!-- 4: Properties panel (resizable) -->
+            <RowDefinition Height="Auto"/>        <!-- 5: Replace / Scan actions -->
+            <RowDefinition Height="Auto"/>        <!-- 6: Status bar -->
         </Grid.RowDefinitions>
 
         <!-- ═══════════════════════════════════════════════════════════════ -->
-        <!-- Row 0: Library Source Header — editable path TextBox            -->
+        <!-- Row 0: Library Source Header — File tab / Local tab              -->
         <!-- ═══════════════════════════════════════════════════════════════ -->
         <Border Grid.Row="0"
                 Background="#FFD6D6D6"
                 BorderThickness="0,0,0,1"
                 BorderBrush="#FFB4B4B4"
-                Padding="8,5">
-            <DockPanel>
-                <Button x:Name="btnChangeLibrary"
-                        DockPanel.Dock="Right"
-                        Content="⚙"
-                        Width="22" Height="22"
-                        Margin="6,0,0,0"
-                        ToolTip="Browse for library .idw file"
-                        Cursor="Hand"
-                        Click="BtnChangeLibrary_Click"
-                        Background="Transparent"
-                        BorderBrush="#FFB4B4B4"
-                        BorderThickness="1"
-                        FontSize="12"
-                        VerticalContentAlignment="Center"
-                        HorizontalContentAlignment="Center"/>
-                <StackPanel VerticalAlignment="Center" DockPanel.Dock="Left">
-                    <TextBlock Text="LIBRARY SOURCE"
+                Padding="6,5">
+            <StackPanel>
+                <!-- Tab bar: File | Local -->
+                <DockPanel Margin="0,0,0,4">
+                    <TextBlock Text="SOURCE:"
                                FontSize="9"
                                FontWeight="Bold"
-                               Foreground="#FF646464"/>
+                               Foreground="#FF646464"
+                               VerticalAlignment="Center"
+                               Margin="0,0,6,0"/>
+                    <StackPanel Orientation="Horizontal">
+                        <RadioButton x:Name="rbSourceFile"
+                                     Content="File"
+                                     GroupName="SourceMode"
+                                     IsChecked="True"
+                                     FontSize="10"
+                                     Margin="0,0,4,0"
+                                     Cursor="Hand"
+                                     Checked="SourceMode_Changed"/>
+                        <RadioButton x:Name="rbSourceLocal"
+                                     Content="Local"
+                                     GroupName="SourceMode"
+                                     FontSize="10"
+                                     Cursor="Hand"
+                                     Checked="SourceMode_Changed"
+                                     ToolTip="Symbols defined in the active drawing document"/>
+                    </StackPanel>
+                </DockPanel>
+
+                <!-- File source row — chỉ hiện khi tab File được chọn -->
+                <DockPanel x:Name="pnlFileSource">
+                    <Button x:Name="btnChangeLibrary"
+                            DockPanel.Dock="Right"
+                            Content="⚙"
+                            Width="22" Height="22"
+                            Margin="4,0,0,0"
+                            ToolTip="Browse for library .idw file"
+                            Cursor="Hand"
+                            Click="BtnChangeLibrary_Click"
+                            Background="Transparent"
+                            BorderBrush="#FFB4B4B4"
+                            BorderThickness="1"
+                            FontSize="12"
+                            VerticalContentAlignment="Center"
+                            HorizontalContentAlignment="Center"/>
                     <!-- Editable path — type/paste path + Enter to load -->
                     <TextBox x:Name="txtLibraryPath"
                              Text=""
@@ -144,10 +169,19 @@
                              BorderThickness="0"
                              Padding="0,1"
                              Foreground="#FF3C3C3C"
+                             VerticalContentAlignment="Center"
                              ToolTip="Type or paste a file/folder path and press Enter to load"
                              KeyDown="TxtLibraryPath_KeyDown"/>
-                </StackPanel>
-            </DockPanel>
+                </DockPanel>
+
+                <!-- Local source row — chỉ hiện khi tab Local được chọn -->
+                <TextBlock x:Name="txtLocalInfo"
+                           Text="Active drawing document"
+                           FontSize="10"
+                           Foreground="#FF3C3C3C"
+                           Visibility="Collapsed"
+                           TextTrimming="CharacterEllipsis"/>
+            </StackPanel>
         </Border>
 
         <!-- ═══════════════════════════════════════════════════════════════ -->
@@ -262,11 +296,26 @@
         <!-- ═══════════════════════════════════════════════════════════════ -->
         <!-- Row 3: Properties Panel                                          -->
         <!-- ═══════════════════════════════════════════════════════════════ -->
-        <Border Grid.Row="3"
+        <!-- Row 3: GridSplitter — kéo để thay đổi chiều cao Properties panel  -->
+        <!-- ═══════════════════════════════════════════════════════════════ -->
+        <GridSplitter Grid.Row="3"
+                      Height="5"
+                      HorizontalAlignment="Stretch"
+                      VerticalAlignment="Center"
+                      Background="#FFB4B4B4"
+                      Cursor="SizeNS"
+                      ShowsPreview="False"/>
+
+        <!-- ═══════════════════════════════════════════════════════════════ -->
+        <!-- Row 4: Properties Panel (resizable)                              -->
+        <!-- ═══════════════════════════════════════════════════════════════ -->
+        <Border Grid.Row="4"
                 Background="#FFD6D6D6"
-                BorderThickness="0,1,0,1"
+                BorderThickness="0,0,0,1"
                 BorderBrush="#FFB4B4B4"
                 Padding="8,6">
+            <ScrollViewer VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled">
             <StackPanel>
                 <TextBlock Text="PROPERTIES"
                            FontSize="9"
@@ -338,12 +387,13 @@
                            VerticalAlignment="Center"/>
                 </Border>
             </StackPanel>
+            </ScrollViewer>
         </Border>
 
         <!-- ═══════════════════════════════════════════════════════════════ -->
-        <!-- Row 4: Replace / Scan Actions                                    -->
+        <!-- Row 5: Replace / Scan Actions                                    -->
         <!-- ═══════════════════════════════════════════════════════════════ -->
-        <Border Grid.Row="4"
+        <Border Grid.Row="5"
                 Background="#FFD6D6D6"
                 BorderThickness="0,0,0,1"
                 BorderBrush="#FFB4B4B4"
@@ -446,9 +496,9 @@
         </Border>
 
         <!-- ═══════════════════════════════════════════════════════════════ -->
-        <!-- Row 5: Status Bar                                                -->
+        <!-- Row 6: Status Bar                                                -->
         <!-- ═══════════════════════════════════════════════════════════════ -->
-        <Border Grid.Row="5"
+        <Border Grid.Row="6"
                 Background="#FFD6D6D6"
                 Padding="8,4">
             <TextBlock x:Name="txtStatus"

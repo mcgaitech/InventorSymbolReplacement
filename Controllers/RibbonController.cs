@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.Drawing;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;                      // NativeWindow (DockWindowSizer)
 using System.Windows.Interop;                    // HwndSource, HwndSourceParameters
@@ -398,6 +399,12 @@ namespace SymbolReplacer.Controllers
             // ── Tạo WPF panel nếu chưa có ────────────────────────────────────────
             if (_panel == null)
             {
+                // Fix BAML "Set connectionId threw an exception" trong COM host:
+                // BAML loader dùng Assembly.Load() để tìm assembly chứa code-behind.
+                // Trong Inventor process, assembly đã load nhưng không nằm trong search path,
+                // nên BAML không kết nối được event handler → lỗi connectionId.
+                // AppDomain.AssemblyResolve cho phép trả về assembly đã load từ cache.
+                AppDomain.CurrentDomain.AssemblyResolve += OnBamlAssemblyResolve;
                 try
                 {
                     _panel = new SymbolReplacerPanel();
@@ -408,6 +415,10 @@ namespace SymbolReplacer.Controllers
                     Debug.WriteLine($"{LOG_PREFIX} LỖI khi tạo SymbolReplacerPanel: {ex.Message}");
                     Debug.WriteLine($"{LOG_PREFIX} Stack:\n{ex.StackTrace}");
                     return;
+                }
+                finally
+                {
+                    AppDomain.CurrentDomain.AssemblyResolve -= OnBamlAssemblyResolve;
                 }
             }
 
@@ -507,6 +518,22 @@ namespace SymbolReplacer.Controllers
                 _embedRetryTimer.Stop();
                 Debug.WriteLine($"{LOG_PREFIX} Retry timer dừng (HWND hợp lệ).");
             }
+        }
+
+        // ─── Private: BAML assembly resolution helper ─────────────────────────
+
+        /// <summary>
+        /// Giúp BAML loader tìm assembly trong COM host khi nó không nằm trong search path.
+        /// Đăng ký tạm thời quanh new SymbolReplacerPanel() để tránh ảnh hưởng toàn bộ AppDomain.
+        /// </summary>
+        private static Assembly OnBamlAssemblyResolve(object sender, ResolveEventArgs args)
+        {
+            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                if (asm.FullName == args.Name)
+                    return asm;
+            }
+            return null;
         }
 
         // ─── Private: Placeholder icon ────────────────────────────────────────

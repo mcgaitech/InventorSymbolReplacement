@@ -17,6 +17,12 @@ namespace SymbolReplacer.Services
         /// </summary>
         IReadOnlyList<SketchedSymbolDefinition> LoadDefinitions(string libraryPath);
 
+        /// <summary>
+        /// Đọc SketchedSymbolDefinitions từ DrawingDocument đang mở (Local source).
+        /// Không mở file — chỉ đọc từ document đã có trong Inventor.
+        /// </summary>
+        IReadOnlyList<SketchedSymbolDefinition> LoadLocalDefinitions(DrawingDocument doc);
+
         /// <summary>Đóng library document (nếu addin đã mở nó)</summary>
         void CloseLibrary();
     }

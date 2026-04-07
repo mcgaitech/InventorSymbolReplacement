@@ -55,6 +55,9 @@ namespace SymbolReplacer.Views
         /// <summary>Raised khi user click "Clear Highlight".</summary>
         public event EventHandler ClearHighlightRequested;
 
+        /// <summary>Raised khi user chọn tab "Local" — PaletteController load từ active document.</summary>
+        public event EventHandler LocalSourceRequested;
+
         // ─── Public properties ────────────────────────────────────────────────
 
         /// <summary>Scale từ textbox — mặc định 1.0 nếu không hợp lệ.</summary>
@@ -92,13 +95,24 @@ namespace SymbolReplacer.Views
             InitializeComponent();
             _symbolGrid = new WpfSymbolGrid(listSymbols);
             SetSearchPlaceholder();
-            // Chọn item khi right-click — wired ở đây thay vì XAML EventSetter
+            // Right-click: chọn item + gán ContextMenu — wired ở đây thay vì XAML Style setter
             // để tránh lỗi BAML connectionId trong COM host (Inventor addin)
             listSymbols.PreviewMouseRightButtonDown += ListSymbols_PreviewMouseRightButtonDown;
             Debug.WriteLine($"{LOG_PREFIX} WPF SymbolReplacerPanel khởi tạo THÀNH CÔNG.");
         }
 
         // ─── Public methods ───────────────────────────────────────────────────
+
+        /// <summary>Cập nhật tên file hiển thị trong Local source row.</summary>
+        public void SetLocalInfo(string docName)
+        {
+            Dispatcher.Invoke(() =>
+            {
+                txtLocalInfo.Text = string.IsNullOrWhiteSpace(docName)
+                    ? "No active drawing"
+                    : docName;
+            });
+        }
 
         /// <summary>Cập nhật đường dẫn library hiển thị trong header TextBox.</summary>
         public void SetLibraryPath(string path)
@@ -218,6 +232,23 @@ namespace SymbolReplacer.Views
             });
         }
 
+        // ─── Source mode toggle (File / Local) ───────────────────────────────
+
+        private void SourceMode_Changed(object sender, RoutedEventArgs e)
+        {
+            if (pnlFileSource == null) return;  // Gọi trước InitializeComponent hoàn tất
+
+            bool isFile = rbSourceFile?.IsChecked == true;
+
+            pnlFileSource.Visibility = isFile ? Visibility.Visible : Visibility.Collapsed;
+            txtLocalInfo.Visibility  = isFile ? Visibility.Collapsed : Visibility.Visible;
+
+            Debug.WriteLine($"{LOG_PREFIX} Source mode: {(isFile ? "File" : "Local")}");
+
+            if (!isFile)
+                LocalSourceRequested?.Invoke(this, EventArgs.Empty);
+        }
+
         // ─── Library path TextBox ─────────────────────────────────────────────
 
         private void TxtLibraryPath_KeyDown(object sender, KeyEventArgs e)
@@ -278,24 +309,31 @@ namespace SymbolReplacer.Views
 
             bool isGrid = rbGridView?.IsChecked == true;
 
+            // Lưu ItemsSource trước khi thay đổi panel — WPF có thể clear source khi rebuild container
+            var savedSource = listSymbols.ItemsSource;
+            listSymbols.ItemsSource = null;
+
             if (isGrid)
             {
+                listSymbols.SetValue(VirtualizingPanel.IsVirtualizingProperty, false);
                 listSymbols.ItemTemplate              = (DataTemplate)Resources["GridItemTemplate"];
                 listSymbols.ItemsPanel                = (ItemsPanelTemplate)Resources["GridPanel"];
                 listSymbols.HorizontalContentAlignment = HorizontalAlignment.Left;
-                listSymbols.SetValue(VirtualizingPanel.IsVirtualizingProperty, false);
                 listSymbols.SetValue(ScrollViewer.HorizontalScrollBarVisibilityProperty,
                                      ScrollBarVisibility.Disabled);
             }
             else
             {
+                listSymbols.SetValue(VirtualizingPanel.IsVirtualizingProperty, true);
                 listSymbols.ItemTemplate              = (DataTemplate)Resources["ListItemTemplate"];
                 listSymbols.ItemsPanel                = (ItemsPanelTemplate)Resources["ListPanel"];
                 listSymbols.HorizontalContentAlignment = HorizontalAlignment.Stretch;
-                listSymbols.SetValue(VirtualizingPanel.IsVirtualizingProperty, true);
                 listSymbols.SetValue(ScrollViewer.HorizontalScrollBarVisibilityProperty,
                                      ScrollBarVisibility.Disabled);
             }
+
+            // Khôi phục ItemsSource sau khi panel mới được áp dụng
+            listSymbols.ItemsSource = savedSource;
 
             Debug.WriteLine($"{LOG_PREFIX} View mode: {(isGrid ? "Grid" : "List")}");
         }
@@ -305,14 +343,23 @@ namespace SymbolReplacer.Views
         private void ListSymbols_PreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e)
         {
             // Chọn item trước khi context menu mở — đảm bảo InsertRequested dùng đúng symbol
-            // Dùng OriginalSource thay vì EventSetter để tránh lỗi BAML connectionId trong COM host
             var dep = e.OriginalSource as DependencyObject;
             if (dep == null) return;
             var item = ItemsControl.ContainerFromElement(listSymbols, dep) as ListBoxItem;
-            if (item != null)
+            if (item == null) return;
+
+            item.IsSelected = true;
+            item.Focus();
+
+            // Gán ContextMenu lần đầu tiên (lazy) — tránh wiring trong XAML Style
+            // vì BAML connectionId không hoạt động trong COM host (Inventor addin)
+            if (item.ContextMenu == null)
             {
-                item.IsSelected = true;
-                item.Focus();
+                var ctx = new ContextMenu();
+                var mi  = new MenuItem { Header = "Insert into Drawing" };
+                mi.Click += ContextMenuInsert_Click;
+                ctx.Items.Add(mi);
+                item.ContextMenu = ctx;
             }
         }
 

@@ -6,38 +6,23 @@
 ## ⚡ Trạng thái hiện tại — Đọc đây trước
 
 ```
-Phase    : Phase 5 — UI Embedding + Panel Features
-Bước     : 5 UI improvements implemented, build PASS
-Trạng thái: [ ] Cần test toàn bộ 5 features mới trong Inventor
+Phase    : Phase 6 — DONE. Build PASS.
+Bước     : Replace bug fixed (floating symbol), test cần xác nhận trong Inventor
+Trạng thái: [ ] User test replace với symbol đang attach vào DrawingView
 ```
 
 ### Làm ngay tiếp theo
 > Claude Code đọc mục này và bắt đầu từ đây, không hỏi lại.
 
 ```
-Test 5 features mới (rebuild với quyền Admin trước):
+Chờ user test replace trong Inventor:
+  1. Đặt symbol lên bản vẽ sao cho nó bám vào DrawingView (kéo vào trong view)
+  2. Dùng Replace → chọn symbol mới → click old symbol
+  3. Kiểm tra: kéo DrawingView → symbol mới có di chuyển theo không?
 
-1. Load library via file path:
-   - Gõ/paste đường dẫn file .idw vào TextBox "LIBRARY SOURCE" → nhấn Enter
-   - Hoặc click ⚙ → chọn file qua dialog
-   - Kiểm tra symbols hiện trong palette
-
-2. Grid / List view toggle:
-   - Click ☰ → chuyển sang list view (thumbnail nhỏ 40×40, tên symbol bên phải)
-   - Click ⊞ → chuyển lại grid view
-
-3. Insert bằng right-click:
-   - Click chọn 1 symbol trong palette → right-click → "Insert into Drawing"
-   - Kiểm tra insert mode hoạt động
-
-4. Replace All dropdown:
-   - Chọn symbol trong palette → click "Replace All ▾"
-   - Phải hiện menu: "Current Sheet Only" / "All Sheets"
-
-5. Scan Sheet:
-   - Mở bản vẽ có symbol
-   - Click "Scan Sheet" → symbols không có trong palette bị highlight (selected)
-   - Click "Clear Highlight" → bỏ selection
+Nếu _AttachedEntity không đủ (symbol vẫn floating sau khi restore):
+  → Thử thêm: set newSym.Static = false SAU KHI gán _AttachedEntity
+  → Hoặc kiểm tra Transformation matrix thay vì Position
 ```
 
 ---
@@ -60,31 +45,32 @@ Test 5 features mới (rebuild với quyền Admin trước):
 | `SESSION_LOG.md` | ✅ Done | File này |
 | `SymbolReplacer.csproj` | ✅ Done | net48, x64, WPF + WinForms |
 | `SymbolReplacer.addin` | ✅ Done | COM GUID đúng |
-| `SymbolReplacerAddin.cs` | 🔧 Bug | Thiếu DI: InteractionController, SymbolReplaceService, ReplaceController |
+| `SymbolReplacerAddin.cs` | ✅ Done | DI đầy đủ, đã xóa OnActivateDocument retry |
 | `Resources/ReplaceSymbol_32.png` | ✅ Done | |
 | `Resources/ReplaceSymbol_16.png` | ✅ Done | |
 | `Models/SymbolDefinitionModel.cs` | ✅ Done | |
 | `Models/LibraryConfigModel.cs` | ✅ Done | |
-| `Models/ReplaceOperationModel.cs` | ❌ Chưa tạo | Phase 3 yêu cầu |
-| `Views/SymbolReplacerPanel.cs` | 🔧 Bug | Thiếu 3 events: ReplaceRequested, ReplaceAllCurrentSheetRequested, ReplaceAllAllSheetsRequested |
-| `Views/ThumbnailGridControl.cs` | ✅ Done | WinForms thay cho XAML |
-| `Controllers/RibbonController.cs` | ✅ Done | |
-| `Controllers/PaletteController.cs` | ✅ Done | |
-| `Controllers/ReplaceController.cs` | ✅ Done | Replace Single PASS |
-| `Controllers/InteractionController.cs` | ✅ Done | Phase 3 complete |
-| `Services/ILibraryService.cs` | ✅ Done | |
-| `Services/LibraryService.cs` | ✅ Done | Support cả folder và single .idw |
+| `Models/ReplaceOperationModel.cs` | ❌ Không cần | Không dùng trong kiến trúc hiện tại |
+| `Views/SymbolReplacerPanel.xaml` | ✅ Done | WPF; GridSplitter resizable properties; Local/File source tab |
+| `Views/SymbolReplacerPanel.xaml.cs` | ✅ Done | Lazy ContextMenu; ViewMode save/restore ItemsSource; SourceMode_Changed |
+| `Views/WpfSymbolGrid.cs` | ✅ Done | Wrapper ListBox, ConvertBitmapToSource |
+| `Views/SymbolReplacerPanel.cs` | 🗑️ Đã xóa | WinForms cũ — thay bằng WPF XAML |
+| `Views/ThumbnailGridControl.cs` | 🗑️ Đã xóa | WinForms cũ — thay bằng WpfSymbolGrid |
+| `Controllers/RibbonController.cs` | ✅ Done | AssemblyResolve BAML fix; HwndSource embed; DockWindowSizer |
+| `Controllers/PaletteController.cs` | ✅ Done | Local source; Scan/Highlight; Search filter |
+| `Controllers/ReplaceController.cs` | ✅ Done | Replace Single/All; Insert mode |
+| `Controllers/InteractionController.cs` | ✅ Done | Pick mode; Insert mode; ESC cancel |
+| `Services/ILibraryService.cs` | ✅ Done | Thêm LoadLocalDefinitions() |
+| `Services/LibraryService.cs` | ✅ Done | Folder + single .idw + Local doc |
 | `Services/IThumbnailService.cs` | ✅ Done | |
-| `Services/ThumbnailService.cs` | ✅ Done | |
+| `Services/ThumbnailService.cs` | ✅ Done | GDI render + cache |
 | `Services/ISymbolReplaceService.cs` | ✅ Done | |
-| `Services/SymbolReplaceService.cs` | ✅ Done | Phase 4 logic done |
+| `Services/SymbolReplaceService.cs` | 🔧 Bug | Replace tạo floating symbol — view attachment không được preserve |
 | `Services/IConfigService.cs` | ✅ Done | |
 | `Services/ConfigService.cs` | ✅ Done | |
 | `Helpers/PictureDispConverter.cs` | ✅ Done | |
 | `Helpers/CoordinateHelper.cs` | ✅ Done | |
 | `Helpers/GdiRenderHelper.cs` | ✅ Done | |
-| `Views/ConfirmReplaceAllDialog` | ❌ Chưa tạo | Phase 4 — REPLACED bởi MessageBox.Show() trong ReplaceController |
-| `ViewModels/` | ❌ Không cần | Dùng WinForms thay WPF/MVVM |
 | `deploy.bat` | ✅ Done | Copy dll+addin vào %AppData% |
 
 **Ký hiệu**: ✅ Done — 🔧 Có bug — ❌ Chưa làm — ⏳ Đang làm
@@ -95,16 +81,86 @@ Test 5 features mới (rebuild với quyền Admin trước):
 
 | Thay đổi | Lý do |
 |----------|-------|
-| WinForms thay WPF XAML | DockableWindow nhận HWND trực tiếp, WinForms embed đơn giản hơn HwndSource |
-| Không có ViewModels/ | WinForms không cần MVVM |
-| ConfirmReplaceAllDialog → MessageBox | Đơn giản hơn, đủ dùng, không cần dialog riêng |
-| ThumbnailGridControl.cs (WinForms Panel custom) | Thay cho WPF ItemsControl thumbnail grid |
+| WPF XAML (HwndSource) thay WinForms | BAML AssemblyResolve fix cho phép WPF hoạt động trong COM host |
+| WpfSymbolGrid.cs thay ThumbnailGridControl | Wrapper ListBox WPF, giữ nguyên interface |
+| ConfirmReplaceAllDialog → MessageBox | Đơn giản hơn, đủ dùng |
+| Không có ViewModels/ | Controller trực tiếp update View qua public methods |
+| OnActivateDocument retry đã xóa | Không cần mở/đóng Inventor để load ribbon |
 
 ---
 
 ## 🗒️ Session Log Chi Tiết
 <!-- Claude Code thêm vào ĐẦU mục này (mới nhất lên trên) -->
 <!-- Giữ lại tối đa 10 session gần nhất -->
+
+---
+### Session: 2026-04-08 (run 2) — Tasks 1-3 DONE + Replace bug analysis
+
+**Tasks completed (build PASS)**:
+
+| # | Task | File | Status |
+|---|------|------|--------|
+| 1 | Fix view toggle mất symbols | SymbolReplacerPanel.xaml.cs `ViewMode_Changed` | ✅ Done |
+| 2 | Properties panel resizable (GridSplitter) | SymbolReplacerPanel.xaml Row 3 splitter | ✅ Done |
+| 3 | Local source tab | Panel.xaml, Panel.xaml.cs, ILibraryService, LibraryService, PaletteController | ✅ Done |
+
+**Bug mới phát hiện: Replace tạo floating symbol**
+
+Root cause nằm ở `SymbolReplaceService.ReplaceOne()`:
+
+```
+Inventor object model — 2 cách đặt SketchedSymbol:
+
+[Sheet level — floating]
+  Sheet
+  └─ SketchedSymbols.Add() → symbol.Parent = Sheet
+     Symbol di chuyển độc lập với DrawingView
+
+[View level — attached]
+  Sheet
+  └─ DrawingViews[i]
+     └─ SketchedSymbols.Add() → symbol.Parent = DrawingView
+        Symbol di chuyển CÙNG DrawingView khi di chuyển view
+```
+
+Code hiện tại luôn dùng `sheet.SketchedSymbols.Add()` → tạo floating.
+Cần detect xem old symbol có parent là DrawingView không, và insert vào đúng collection.
+
+**Inventor API quirk đã xác nhận**:
+- `SketchedSymbol.Parent` trả về `Sheet` hoặc `DrawingView` tùy cách đặt
+- `Sheet.SketchedSymbols` chứa TẤT CẢ symbols trên sheet kể cả view-attached
+- `DrawingView.SketchedSymbols` chỉ chứa symbols attach vào view đó
+- Position trong cả 2 trường hợp đều là sheet coordinates (paper space)
+
+---
+### Session: 2026-04-08 (run 1) — Test results + 4 pending tasks
+
+**Test results từ user (Inventor thực tế)**:
+
+| # | Feature | Kết quả |
+|---|---------|---------|
+| 1 | Palette hiển thị đầy đủ | ✅ PASS |
+| 2 | Grid/List view toggle | ✅ PASS (nhưng có bug — xem bên dưới) |
+| 3 | Load library link (⚙ dialog) | ✅ PASS |
+| 4 | Scan Sheet + highlight | ✅ PASS |
+| 5 | View toggle bug | ❌ Sau khi load symbols, đổi Grid↔List → symbols biến mất |
+| 6 | Properties panel resize | ❌ Chưa có — user muốn kéo height |
+| 7 | Local symbols | ❌ Chưa có — user muốn xem symbols từ active drawing |
+
+**Fixes trong session này**:
+- BAML connectionId lỗi: `ContextMenuInsert_Click` trong Style `<Setter><ContextMenu>` → đã di chuyển ContextMenu ra khỏi XAML style, tạo lazy trong code-behind qua `PreviewMouseRightButtonDown`
+- Removed `OnActivateDocument` retry mechanism (user yêu cầu không cần mở/đóng Inventor)
+- Added `AppDomain.CurrentDomain.AssemblyResolve` hook quanh `new SymbolReplacerPanel()` để giải quyết BAML assembly resolution trong COM host
+
+**Files đã sửa trong session này**:
+| File | Thay đổi |
+|------|---------|
+| `Views/SymbolReplacerPanel.xaml` | Xóa `EventSetter` + Xóa `<ContextMenu>` khỏi ItemContainerStyle |
+| `Views/SymbolReplacerPanel.xaml.cs` | Lazy ContextMenu trong `ListSymbols_PreviewMouseRightButtonDown` |
+| `Controllers/RibbonController.cs` | `AssemblyResolve` hook + `OnBamlAssemblyResolve` method |
+| `SymbolReplacerAddin.cs` | Xóa `_appEvents`, `OnActivateDocument`, `_ribbonUICreated` retry |
+
+**Build**: PASS
 
 ---
 ### Session: 2026-04-07 (run 4) — 5 UI improvements

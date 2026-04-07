@@ -72,6 +72,7 @@ namespace SymbolReplacer.Controllers
                 _panel.SearchQueryChanged         += OnSearchQueryChanged;
                 _panel.ScanSheetRequested         += OnScanSheetRequested;
                 _panel.ClearHighlightRequested    += OnClearHighlightRequested;
+                _panel.LocalSourceRequested       += OnLocalSourceRequested;
                 _panel.SymbolGrid.SelectionChanged += OnSymbolSelectionChanged;
                 Debug.WriteLine($"{LOG_PREFIX} Đã attach panel.");
             }
@@ -321,6 +322,50 @@ namespace SymbolReplacer.Controllers
 
         // ─── Event handlers ───────────────────────────────────────────────────
 
+        private void OnLocalSourceRequested(object sender, EventArgs e)
+        {
+            Debug.WriteLine($"{LOG_PREFIX} LocalSourceRequested.");
+
+            _thumbnailService.ClearCache();
+            foreach (var sym in _allSymbols) sym.Dispose();
+            _allSymbols.Clear();
+            _panel?.SymbolGrid?.SetItems(null);
+
+            var doc = _app.ActiveDocument as Inventor.DrawingDocument;
+            if (doc == null)
+            {
+                _panel?.SetStatusError("No active Drawing document.");
+                return;
+            }
+
+            // Hiển thị tên file trong Local row
+            string docName = System.IO.Path.GetFileName(doc.FullFileName);
+            _panel?.SetLocalInfo(docName);
+
+            var definitions = _libraryService.LoadLocalDefinitions(doc);
+            if (definitions.Count == 0)
+            {
+                _panel?.SetStatusInfo("Local: no symbols found in active document.");
+                return;
+            }
+
+            foreach (var def in definitions)
+            {
+                _allSymbols.Add(new SymbolDefinitionModel
+                {
+                    Name        = def.Name,
+                    Definition  = def,
+                    Thumbnail   = _thumbnailService.GetThumbnail(def),
+                    SourceFile  = doc.FullFileName,
+                    PromptCount = CountPromptFields(def)
+                });
+            }
+
+            Debug.WriteLine($"{LOG_PREFIX} Local: loaded {_allSymbols.Count} symbols.");
+            _panel?.SetStatusInfo($"Local: {_allSymbols.Count} symbol(s) from active document.");
+            ApplyFilter();
+        }
+
         private void OnLibraryPathChangeRequested(object sender, string newPath)
         {
             Debug.WriteLine($"{LOG_PREFIX} Library path: {newPath}");
@@ -365,6 +410,7 @@ namespace SymbolReplacer.Controllers
             _panel.SearchQueryChanged         -= OnSearchQueryChanged;
             _panel.ScanSheetRequested         -= OnScanSheetRequested;
             _panel.ClearHighlightRequested    -= OnClearHighlightRequested;
+            _panel.LocalSourceRequested       -= OnLocalSourceRequested;
 
             if (_panel.SymbolGrid != null)
                 _panel.SymbolGrid.SelectionChanged -= OnSymbolSelectionChanged;

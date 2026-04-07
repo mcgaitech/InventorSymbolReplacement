@@ -1,0 +1,14 @@
+E:\Programming\InventorSymbolReplacement\probe\bin\Debug\net48\ProbeInvApi.exe.config
+E:\Programming\InventorSymbolReplacement\probe\bin\Debug\net48\ProbeInvApi.exe
+E:\Programming\InventorSymbolReplacement\probe\bin\Debug\net48\ProbeInvApi.pdb
+E:\Programming\InventorSymbolReplacement\probe\bin\Debug\net48\Autodesk.Inventor.Interop.dll
+E:\Programming\InventorSymbolReplacement\probe\bin\Debug\net48\Autodesk.Inventor.Interop.xml
+E:\Programming\InventorSymbolReplacement\probe\obj\Debug\net48\ProbeInvApi.csproj.AssemblyReference.cache
+E:\Programming\InventorSymbolReplacement\probe\obj\Debug\net48\ProbeInvApi.GeneratedMSBuildEditorConfig.editorconfig
+E:\Programming\InventorSymbolReplacement\probe\obj\Debug\net48\ProbeInvApi.AssemblyInfoInputs.cache
+E:\Programming\InventorSymbolReplacement\probe\obj\Debug\net48\ProbeInvApi.AssemblyInfo.cs
+E:\Programming\InventorSymbolReplacement\probe\obj\Debug\net48\ProbeInvApi.csproj.CoreCompileInputs.cache
+E:\Programming\InventorSymbolReplacement\probe\obj\Debug\net48\ProbeInvApi.sourcelink.json
+E:\Programming\InventorSymbolReplacement\probe\obj\Debug\net48\ProbeInv.2630993C.Up2Date
+E:\Programming\InventorSymbolReplacement\probe\obj\Debug\net48\ProbeInvApi.exe
+E:\Programming\InventorSymbolReplacement\probe\obj\Debug\net48\ProbeInvApi.pdb

@@ -39,6 +39,13 @@
       Importance="high" />
   </Target>
 
+  <!-- Loại trừ thư mục probe/ (dùng để khám phá Inventor API) -->
+  <ItemGroup>
+    <Compile Remove="probe\**" />
+    <EmbeddedResource Remove="probe\**" />
+    <None Remove="probe\**" />
+  </ItemGroup>
+
   <ItemGroup>
     <!-- Autodesk.Inventor.Interop — KHÔNG embed (EmbedInteropTypes=False) vì Inventor API cần resolve lúc runtime -->
     <!-- Inventor 2023: DLL nằm trong subfolder "Public Assemblies" -->
