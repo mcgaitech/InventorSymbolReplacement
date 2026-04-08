@@ -6,23 +6,30 @@
 ## ⚡ Trạng thái hiện tại — Đọc đây trước
 
 ```
-Phase    : Phase 6 — DONE. Build PASS.
-Bước     : Replace bug fixed (floating symbol), test cần xác nhận trong Inventor
-Trạng thái: [ ] User test replace với symbol đang attach vào DrawingView
+Phase    : Phase 6 — BUG OPEN
+Bước     : E_INVALIDARG khi Insert/Replace symbol có prompt fields — cần fix PromptStrings format
+Trạng thái: [ ] Chờ user xác nhận plan trước khi implement
 ```
 
 ### Làm ngay tiếp theo
 > Claude Code đọc mục này và bắt đầu từ đây, không hỏi lại.
 
 ```
-Chờ user test replace trong Inventor:
-  1. Đặt symbol lên bản vẽ sao cho nó bám vào DrawingView (kéo vào trong view)
-  2. Dùng Replace → chọn symbol mới → click old symbol
-  3. Kiểm tra: kéo DrawingView → symbol mới có di chuyển theo không?
+BUG: SketchedSymbols.Add() ném E_INVALIDARG khi symbol có prompt fields
+  File: Services/SymbolReplaceService.cs → BuildPromptStrings()
+  Root cause: PromptStrings phải là string[] (SAFEARRAY of BSTR), KHÔNG phải NameValueMap
+  Inventor COM kiểm tra VT_ARRAY|VT_BSTR; NameValueMap là VT_DISPATCH → bị reject
 
-Nếu _AttachedEntity không đủ (symbol vẫn floating sau khi restore):
-  → Thử thêm: set newSym.Static = false SAU KHI gán _AttachedEntity
-  → Hoặc kiểm tra Transformation matrix thay vì Position
+Kế hoạch đã đề xuất (chờ user confirm):
+  Option A (ưu tiên): đổi BuildPromptStrings() trả về string[] thay NameValueMap
+    - Build mảng theo thứ tự TextBox có <Prompt ReadOnlyUniqueID> trong FormattedText
+    - Value từ snapshot (replace) hoặc TextBox.Text (insert mới)
+    - Pass: (object)(new string[] { "DECK", "ABL" })
+  Option B (fallback): insert với Type.Missing, rồi SetPromptResultText() từng TextBox sau
+  Option C (quick try): thử null thay vì Type.Missing
+
+Chỉ sửa: Services/SymbolReplaceService.cs (BuildPromptStrings)
+Không sửa file nào khác
 ```
 
 ---
@@ -65,12 +72,13 @@ Nếu _AttachedEntity không đủ (symbol vẫn floating sau khi restore):
 | `Services/IThumbnailService.cs` | ✅ Done | |
 | `Services/ThumbnailService.cs` | ✅ Done | GDI render + cache |
 | `Services/ISymbolReplaceService.cs` | ✅ Done | |
-| `Services/SymbolReplaceService.cs` | 🔧 Bug | Replace tạo floating symbol — view attachment không được preserve |
+| `Services/SymbolReplaceService.cs` | ✅ Done | Fixed: snapshot+restore `_AttachedEntity`+`Static`; `GetSheetFromSymbol()` simplified |
 | `Services/IConfigService.cs` | ✅ Done | |
 | `Services/ConfigService.cs` | ✅ Done | |
 | `Helpers/PictureDispConverter.cs` | ✅ Done | |
 | `Helpers/CoordinateHelper.cs` | ✅ Done | |
 | `Helpers/GdiRenderHelper.cs` | ✅ Done | |
+| `probe/ProbeInvApi.cs` | ✅ Done | Reflection probe — khám phá Inventor API members (không build cùng main project) |
 | `deploy.bat` | ✅ Done | Copy dll+addin vào %AppData% |
 
 **Ký hiệu**: ✅ Done — 🔧 Có bug — ❌ Chưa làm — ⏳ Đang làm
@@ -94,43 +102,85 @@ Nếu _AttachedEntity không đủ (symbol vẫn floating sau khi restore):
 <!-- Giữ lại tối đa 10 session gần nhất -->
 
 ---
-### Session: 2026-04-08 (run 2) — Tasks 1-3 DONE + Replace bug analysis
+### Session: 2026-04-08 (run 4) — Phân tích E_INVALIDARG PromptStrings
+
+**Vấn đề**: `InsertSymbol` và `ReplaceOne` ném E_INVALIDARG khi symbol có prompt fields.
+
+**Log xác nhận**:
+```
+TB[0] promptUID='1' value='DECK'
+TB[1] promptUID='2' value='ABL'
+BuildPromptStrings: 2 prompt entries.
+LỖI InsertSymbol: The parameter is incorrect. (E_INVALIDARG)
+```
+
+**Root cause xác định**:
+`BuildPromptStrings()` trả về `NameValueMap` (COM object, VT_DISPATCH).
+Inventor COM expect `PromptStrings` là `string[]` (SAFEARRAY of BSTR, VT_ARRAY|VT_BSTR).
+Reflection probe xác nhận param type là `System.Object optional=True` — tức là COM Variant.
+Inventor type-checks Variant tag runtime → VT_DISPATCH bị reject.
+
+VBA convention: `Dim p(1) As String: p(0)="DECK": p(1)="ABL": Add def, pt, 0, 1, p`
+
+**Kế hoạch fix (đã đề xuất, chờ xác nhận)**:
+| Option | Mô tả | Ưu tiên |
+|--------|-------|---------|
+| A | Đổi `BuildPromptStrings()` → trả về `string[]` thay `NameValueMap` | 1st |
+| B | Insert với `Type.Missing`, rồi `SetPromptResultText()` sau | 2nd fallback |
+| C | Thử `null` thay `Type.Missing` | 3rd fallback |
+
+**Trạng thái**: Chờ user confirm Option A để implement.
+
+---
+### Session: 2026-04-08 (run 3) — Replace floating bug FIXED
+
+**Root cause thực sự** (xác nhận qua reflection probe vào Autodesk.Inventor.Interop.dll):
+
+`SketchedSymbol._AttachedEntity` (kiểu `GeometryIntent`) — property read/write kiểm soát việc symbol có "bám" vào entity nào không. Khi user đặt symbol lên view trong UI, Inventor set `_AttachedEntity` trỏ tới entity. Khi entity di chuyển, symbol di chuyển theo.
+
+Code cũ snapshot `Position/Rotation/Scale/Layer` nhưng KHÔNG snapshot `_AttachedEntity` và `Static` → symbol mới luôn floating.
+
+**Inventor API facts đã xác nhận qua probe** (quan trọng — đọc kỹ trước khi sửa sau này):
+
+| Fact | Chi tiết |
+|------|---------|
+| `DrawingView.SketchedSymbols` | **KHÔNG TỒN TẠI** trong Inventor 2023 API |
+| `SketchedSymbol.Parent` | Luôn trả về `Sheet` (không bao giờ là `DrawingView`) |
+| `SketchedSymbol._AttachedEntity` | Kiểu `GeometryIntent` — đây là cơ chế attach vào view/entity |
+| `SketchedSymbol.Static` | `true` = cố định tại sheet coords; `false` = tham gia annotation update |
+| `DrawingView` có | `Sketches` (sketch collection), `Include3DAnnotations` — không có SketchedSymbols |
+| Insert symbol | Luôn dùng `Sheet.SketchedSymbols.Add()` — không có cách nào khác |
+| View attachment | Hoàn toàn qua `_AttachedEntity` property trên symbol, không qua collection khác nhau |
+
+**Fix thực hiện trong `SymbolReplaceService.ReplaceOne()`**:
+
+```
+Thứ tự restore SAU khi insert newSym:
+  1. newSym.Static = isStatic           (phải TRƯỚC _AttachedEntity)
+  2. newSym._AttachedEntity = oldEntity (key fix — symbol bám lại vào view/entity)
+  3. newSym.Layer = layer
+  4. RestorePromptText(newSym, snapshot)
+```
+
+**Files đã sửa**:
+| File | Thay đổi |
+|------|---------|
+| `Services/SymbolReplaceService.cs` | Snapshot + restore `_AttachedEntity` + `Static`; xóa `FindAttachedView()` sai; đơn giản hóa `GetSheetFromSymbol()` |
+| `SymbolReplacer.csproj` | Exclude `probe/` subfolder khỏi build |
+| `probe/ProbeInvApi.cs` | Script dùng reflection để khám phá Inventor API (giữ để tham khảo) |
+
+**Build**: PASS (0 errors)
+
+---
+### Session: 2026-04-08 (run 2) — Tasks 1-3 DONE
 
 **Tasks completed (build PASS)**:
 
 | # | Task | File | Status |
 |---|------|------|--------|
-| 1 | Fix view toggle mất symbols | SymbolReplacerPanel.xaml.cs `ViewMode_Changed` | ✅ Done |
-| 2 | Properties panel resizable (GridSplitter) | SymbolReplacerPanel.xaml Row 3 splitter | ✅ Done |
-| 3 | Local source tab | Panel.xaml, Panel.xaml.cs, ILibraryService, LibraryService, PaletteController | ✅ Done |
-
-**Bug mới phát hiện: Replace tạo floating symbol**
-
-Root cause nằm ở `SymbolReplaceService.ReplaceOne()`:
-
-```
-Inventor object model — 2 cách đặt SketchedSymbol:
-
-[Sheet level — floating]
-  Sheet
-  └─ SketchedSymbols.Add() → symbol.Parent = Sheet
-     Symbol di chuyển độc lập với DrawingView
-
-[View level — attached]
-  Sheet
-  └─ DrawingViews[i]
-     └─ SketchedSymbols.Add() → symbol.Parent = DrawingView
-        Symbol di chuyển CÙNG DrawingView khi di chuyển view
-```
-
-Code hiện tại luôn dùng `sheet.SketchedSymbols.Add()` → tạo floating.
-Cần detect xem old symbol có parent là DrawingView không, và insert vào đúng collection.
-
-**Inventor API quirk đã xác nhận**:
-- `SketchedSymbol.Parent` trả về `Sheet` hoặc `DrawingView` tùy cách đặt
-- `Sheet.SketchedSymbols` chứa TẤT CẢ symbols trên sheet kể cả view-attached
-- `DrawingView.SketchedSymbols` chỉ chứa symbols attach vào view đó
-- Position trong cả 2 trường hợp đều là sheet coordinates (paper space)
+| 1 | Fix view toggle mất symbols | SymbolReplacerPanel.xaml.cs `ViewMode_Changed` — save/restore ItemsSource | ✅ Done |
+| 2 | Properties panel resizable (GridSplitter) | SymbolReplacerPanel.xaml — Row 3 splitter, Properties → Row 4 `Height=180 MinHeight=60` | ✅ Done |
+| 3 | Local source tab (SOURCE: File / Local) | Panel.xaml + xaml.cs + ILibraryService + LibraryService + PaletteController | ✅ Done |
 
 ---
 ### Session: 2026-04-08 (run 1) — Test results + 4 pending tasks

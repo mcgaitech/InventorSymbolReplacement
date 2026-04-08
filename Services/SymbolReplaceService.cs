@@ -192,10 +192,14 @@ namespace SymbolReplacer.Services
             // Resolve definition trong active document (tránh cross-doc reference)
             var resolvedDef = ResolveDefinitionInDocument(doc, definition);
 
+            // BUG 1 FIX: Truyền NameValueMap thay vì Type.Missing.
+            // Khi definition có prompt fields, Add() ném E_INVALIDARG nếu nhận Type.Missing.
+            var promptStrings = BuildPromptStrings(resolvedDef);
+
             var tx = _app.TransactionManager.StartTransaction((_Document)doc, "Insert Symbol");
             try
             {
-                var newSym = sheet.SketchedSymbols.Add(resolvedDef, position, rotation, scale, Type.Missing);
+                var newSym = sheet.SketchedSymbols.Add(resolvedDef, position, rotation, scale, promptStrings);
                 tx.End();
                 Debug.WriteLine($"{LOG_PREFIX} InsertSymbol THÀNH CÔNG: '{newSym.Name}'");
                 return true;
@@ -225,12 +229,23 @@ namespace SymbolReplacer.Services
             double scale = old.Scale;
             var layer    = old.Layer;
 
-            // _AttachedEntity: entity mà symbol đang bám theo (DrawingView hoặc geometry).
-            // Đây là nguyên nhân symbol di chuyển cùng view/object khi bị kéo.
-            // Phải snapshot TRƯỚC khi Delete() — COM reference vẫn valid vì entity chưa bị xóa.
-            GeometryIntent attachedEntity = null;
-            try { attachedEntity = old._AttachedEntity; }
-            catch { /* null nếu symbol là floating */ }
+            // BUG 2 FIX — Bước 1a: Capture Geometry thô từ GeometryIntent TRƯỚC khi Delete().
+            // Sau old.Delete(), GeometryIntent COM wrapper bị stale (internal pointer bị hủy).
+            // Nhưng Geometry mà nó trỏ tới (DrawingCurve, DrawingView...) KHÔNG bị xóa.
+            // → Lưu Geometry thô + Intent, sau Delete() dùng Sheet.CreateGeometryIntent()
+            //   để tạo lại GeometryIntent hợp lệ trỏ về cùng geometry.
+            object attachedRawGeometry = null;
+            object attachedRawIntent   = null;
+            try
+            {
+                var gi = old._AttachedEntity;
+                if (gi != null)
+                {
+                    attachedRawGeometry = gi.Geometry;
+                    attachedRawIntent   = gi.Intent;
+                }
+            }
+            catch { /* floating symbol — không có attachment */ }
 
             // Static = false: symbol tham gia cập nhật annotation (di chuyển cùng entity)
             // Static = true : symbol cố định tại sheet coordinates
@@ -238,11 +253,11 @@ namespace SymbolReplacer.Services
             try { isStatic = old.Static; }
             catch { }
 
-            // Snapshot attribute values trước khi xóa
+            // Snapshot prompt text trước khi xóa
             var attrSnapshot = SnapshotPromptText(old);
 
             Debug.WriteLine($"{LOG_PREFIX}   Snapshot: pos=({posX:F3},{posY:F3}) rot={rot:F3} scale={scale:F3}" +
-                            $" static={isStatic} hasAttach={attachedEntity != null} attrs={attrSnapshot.Count}");
+                            $" static={isStatic} hasAttach={attachedRawGeometry != null} attrs={attrSnapshot.Count}");
 
             // ── Bước 2: Resolve definition trong document hiện tại ──
             var doc = sheet.Parent as DrawingDocument;
@@ -250,34 +265,39 @@ namespace SymbolReplacer.Services
             Debug.WriteLine($"{LOG_PREFIX}   Resolved definition: '{resolvedDef.Name}'");
 
             // ── Bước 3: Delete old instance ──
+            // Sau dòng này: attachedRawEntity vẫn valid (entity chưa bị xóa).
             old.Delete();
             Debug.WriteLine($"{LOG_PREFIX}   Deleted old instance.");
 
             // ── Bước 4: Tạo Point2d mới từ TransientGeometry (COM object cũ đã stale) ──
             var freshPos = _app.TransientGeometry.CreatePoint2d(posX, posY);
 
-            // ── Bước 5: Insert new instance ──
+            // ── Bước 5: Build PromptStrings + Insert ──
+            // BUG 1 FIX: Truyền NameValueMap thay vì Type.Missing.
+            // Khi definition có prompt fields, Add() ném E_INVALIDARG nếu nhận Type.Missing.
+            // Điền giá trị từ snapshot vào NameValueMap → prompt text được set ngay lúc tạo.
+            var promptStrings = BuildPromptStrings(resolvedDef, attrSnapshot);
             var newSym = sheet.SketchedSymbols.Add(
-                resolvedDef, freshPos, rot, scale, Type.Missing);
+                resolvedDef, freshPos, rot, scale, promptStrings);
             Debug.WriteLine($"{LOG_PREFIX}   Inserted: '{newSym.Name}'.");
 
-            // ── Bước 6: Restore Static ──
-            // Phải set TRƯỚC _AttachedEntity — nếu Static=true thì attachment bị bỏ qua
+            // ── Bước 6: Restore Static (trước _AttachedEntity) ──
             try { newSym.Static = isStatic; }
             catch (Exception ex)
             {
                 Debug.WriteLine($"{LOG_PREFIX}   CẢNH BÁO: Không restore Static: {ex.Message}");
             }
 
-            // ── Bước 7: Restore _AttachedEntity ──
-            // Đây là fix chính: symbol mới sẽ di chuyển cùng DrawingView/entity
-            // giống như symbol cũ thay vì bị floating trên sheet.
-            if (attachedEntity != null)
+            // ── Bước 7: Tái tạo GeometryIntent và gán vào symbol mới ──
+            // BUG 2 FIX: Không dùng lại GeometryIntent cũ (đã stale sau Delete()).
+            // Dùng Sheet.CreateGeometryIntent(Geometry, Intent) để tạo mới từ raw geometry.
+            if (attachedRawGeometry != null)
             {
                 try
                 {
-                    newSym._AttachedEntity = attachedEntity;
-                    Debug.WriteLine($"{LOG_PREFIX}   _AttachedEntity restored → symbol sẽ di chuyển cùng entity.");
+                    var freshIntent = sheet.CreateGeometryIntent(attachedRawGeometry, attachedRawIntent);
+                    newSym._AttachedEntity = freshIntent;
+                    Debug.WriteLine($"{LOG_PREFIX}   GeometryIntent tái tạo thành công → symbol di chuyển cùng entity.");
                 }
                 catch (Exception ex)
                 {
@@ -296,7 +316,7 @@ namespace SymbolReplacer.Services
                 Debug.WriteLine($"{LOG_PREFIX}   CẢNH BÁO: Không restore Layer: {ex.Message}");
             }
 
-            // ── Bước 9: Copy attribute values (prompt text) ──
+            // ── Bước 9: Restore prompt text (fallback nếu BuildPromptStrings key không khớp) ──
             RestorePromptText(newSym, attrSnapshot);
         }
 
@@ -320,6 +340,130 @@ namespace SymbolReplacer.Services
         // ─── Attribute / Prompt text helpers ─────────────────────────────────
 
         /// <summary>
+        /// Tạo argument PromptStrings cho SketchedSymbols.Add().
+        ///
+        /// Inventor API quirk:
+        ///   - Symbol KHÔNG có prompt fields → phải truyền Type.Missing (không phải empty NVM)
+        ///   - Symbol CÓ prompt fields       → phải truyền NameValueMap với entries đầy đủ
+        ///   - Truyền empty NameValueMap khi không cần → E_INVALIDARG
+        ///
+        /// Trả về Type.Missing (boxed) hoặc NameValueMap đã populate.
+        /// Key format trong NVM: 1-based index string ("1", "2", ...).
+        /// </summary>
+        private object BuildPromptStrings(SketchedSymbolDefinition def,
+                                          Dictionary<string, string> snapshot = null)
+        {
+            try
+            {
+                var sketch = def?.Sketch;
+                if (sketch == null) return Type.Missing;
+
+                int totalBoxes = 0;
+                try { totalBoxes = sketch.TextBoxes.Count; } catch { }
+
+                if (totalBoxes == 0)
+                {
+                    Debug.WriteLine($"{LOG_PREFIX}   BuildPromptStrings: 0 TextBoxes → Type.Missing.");
+                    return Type.Missing;
+                }
+
+                // Log toàn bộ TextBox content để hiểu format của prompt field
+                int logIdx = 0;
+                foreach (TextBox tb in sketch.TextBoxes)
+                {
+                    string rawText      = "<err>";
+                    string formattedTxt = "<err>";
+                    try { rawText      = tb.Text ?? "(null)"; }      catch (Exception ex) { rawText      = $"ERR:{ex.Message}"; }
+                    try { formattedTxt = tb.FormattedText ?? "(null)"; } catch (Exception ex) { formattedTxt = $"ERR:{ex.Message}"; }
+                    Debug.WriteLine($"{LOG_PREFIX}   TB[{logIdx}] Text='{rawText}' FormattedText='{formattedTxt}'");
+                    logIdx++;
+                }
+
+                // Inventor lưu prompt field trong FormattedText:
+                //   <Prompt ReadOnlyUniqueID='1'>DefaultText</Prompt>
+                // NVM key   = ReadOnlyUniqueID value ("1", "2", ...)
+                // NVM value = text cần điền (lấy từ snapshot khi replace, hoặc default text)
+                var nvm = _app.TransientObjects.CreateNameValueMap();
+                int nvmCount = 0;
+                int tbIdx    = 0;
+
+                foreach (TextBox tb in sketch.TextBoxes)
+                {
+                    try
+                    {
+                        string formatted = string.Empty;
+                        try { formatted = tb.FormattedText ?? string.Empty; } catch { }
+
+                        string uid = ExtractPromptUID(formatted);
+                        if (uid == null)
+                        {
+                            tbIdx++;
+                            continue;  // TextBox thường, không phải prompt field
+                        }
+
+                        // Lấy value từ snapshot (replace), hoặc default text từ TextBox.Text
+                        string snapshotKey = $"tb_{tbIdx}_{(tb.Text?.Trim() ?? string.Empty)}";
+                        string value       = tb.Text ?? string.Empty;  // default = existing text
+                        snapshot?.TryGetValue(snapshotKey, out value);
+
+                        nvm.Add(uid, value ?? string.Empty);
+                        nvmCount++;
+                        Debug.WriteLine($"{LOG_PREFIX}   TB[{tbIdx}] promptUID='{uid}' value='{value}'.");
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"{LOG_PREFIX}   TB[{tbIdx}] LỖI: {ex.Message}");
+                    }
+                    tbIdx++;
+                }
+
+                if (nvmCount == 0)
+                {
+                    Debug.WriteLine($"{LOG_PREFIX}   BuildPromptStrings: không có prompt field → Type.Missing.");
+                    return Type.Missing;
+                }
+
+                Debug.WriteLine($"{LOG_PREFIX}   BuildPromptStrings: {nvmCount} prompt entries.");
+                return nvm;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"{LOG_PREFIX}   LỖI BuildPromptStrings: {ex.Message}");
+                return Type.Missing;
+            }
+        }
+
+        /// <summary>
+        /// Trích xuất ReadOnlyUniqueID từ FormattedText của TextBox.
+        /// Inventor lưu prompt field dưới dạng:
+        ///   &lt;Prompt ReadOnlyUniqueID='N'&gt;DefaultText&lt;/Prompt&gt;
+        /// NVM key khi gọi SketchedSymbols.Add() phải là giá trị N đó.
+        /// Trả về null nếu TextBox không phải prompt field.
+        /// </summary>
+        private static string ExtractPromptUID(string formattedText)
+        {
+            if (string.IsNullOrWhiteSpace(formattedText)) return null;
+
+            // Tìm ReadOnlyUniqueID='N' hoặc ReadOnlyUniqueID="N"
+            const string marker = "ReadOnlyUniqueID=";
+            int markerIdx = formattedText.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            if (markerIdx < 0) return null;
+
+            int quoteStart = markerIdx + marker.Length;
+            if (quoteStart >= formattedText.Length) return null;
+
+            char quote = formattedText[quoteStart];  // ' hoặc "
+            if (quote != '\'' && quote != '"') return null;
+
+            int valStart = quoteStart + 1;
+            int valEnd   = formattedText.IndexOf(quote, valStart);
+            if (valEnd <= valStart) return null;
+
+            string uid = formattedText.Substring(valStart, valEnd - valStart).Trim();
+            return string.IsNullOrEmpty(uid) ? null : uid;
+        }
+
+        /// <summary>
         /// Lấy toàn bộ prompt text từ symbol cũ.
         /// Key = TextBox.Name (nếu có) hoặc index.
         /// </summary>
@@ -338,10 +482,10 @@ namespace SymbolReplacer.Services
                 {
                     try
                     {
+                        // Key phải khớp với snapshotKey trong BuildPromptStrings:
+                        // "tb_{idx}_{tb.Text.Trim()}"
                         string text = symbol.GetResultText(tb);
-                        string key  = !string.IsNullOrEmpty(tb.Text)
-                            ? $"tb_{idx}_{tb.Text.Trim()}"
-                            : $"tb_{idx}";
+                        string key  = $"tb_{idx}_{(tb.Text?.Trim() ?? string.Empty)}";
                         result[key] = text ?? string.Empty;
                     }
                     catch { }
