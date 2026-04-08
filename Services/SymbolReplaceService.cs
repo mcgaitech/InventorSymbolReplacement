@@ -215,6 +215,102 @@ namespace SymbolReplacer.Services
         // ─── Core replace logic ───────────────────────────────────────────────
 
         /// <summary>
+        /// Snapshot dữ liệu leader của một SketchedSymbol.
+        /// Tất cả COM object được tách ra thành primitive (double) để tránh stale reference sau Delete().
+        /// </summary>
+        private struct LeaderLeafSnapshot
+        {
+            public double PosX;
+            public double PosY;
+            public object Geometry;  // COM object — vẫn valid sau Delete() symbol
+            public object Intent;    // COM object (Int32/Double/__ComObject) — vẫn valid sau Delete()
+        }
+
+        private struct LeaderSnapshot
+        {
+            public bool HasLeader;
+            public LeaderLeafSnapshot[] Leaves;  // thường chỉ có 1 leaf
+        }
+
+        /// <summary>
+        /// Snapshot Leader structure từ symbol trước khi Delete().
+        /// Kết quả chứa leaf positions và GeometryIntent components dưới dạng primitive / raw COM ref.
+        /// </summary>
+        private static LeaderSnapshot SnapshotLeader(SketchedSymbol symbol)
+        {
+            var snap = new LeaderSnapshot();
+            try
+            {
+                snap.HasLeader = symbol.Leader.HasRootNode;
+                if (!snap.HasLeader) return snap;
+
+                var leaves = new System.Collections.Generic.List<LeaderLeafSnapshot>();
+                foreach (LeaderNode leaf in symbol.Leader.AllLeafNodes)
+                {
+                    var ls = new LeaderLeafSnapshot();
+                    try { ls.PosX = leaf.Position.X; ls.PosY = leaf.Position.Y; } catch { }
+                    try
+                    {
+                        var gi = leaf.AttachedEntity;
+                        if (gi != null)
+                        {
+                            ls.Geometry = gi.Geometry;
+                            ls.Intent   = gi.Intent;
+                        }
+                    }
+                    catch { }
+                    leaves.Add(ls);
+                }
+                snap.Leaves = leaves.ToArray();
+                Debug.WriteLine($"{LOG_PREFIX}   SnapshotLeader: {snap.Leaves.Length} leaf(s).");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"{LOG_PREFIX}   SnapshotLeader LỖI: {ex.Message}");
+                snap.HasLeader = false;
+            }
+            return snap;
+        }
+
+        /// <summary>
+        /// Restore Leader lên symbol mới sau khi Add().
+        ///
+        /// Inventor API (xác nhận qua probe):
+        ///   - Sau Add(), symbol có HasRootNode=False (không có leader).
+        ///   - AddLeader(ObjectCollection) PHẢI nhận [Point2d, GeometryIntent]:
+        ///       pts[0] = Point2d tại vị trí leaf (đầu mũi tên)
+        ///       pts[1] = GeometryIntent tạo bởi sheet.CreateGeometryIntent()
+        ///   - AddLeader([GeometryIntent]) đơn lẻ → E_FAIL.
+        ///   - symbol._AttachedEntity = value → "Value does not fall within the expected range".
+        /// </summary>
+        private void RestoreLeader(SketchedSymbol newSym, LeaderSnapshot snap, Sheet sheet)
+        {
+            if (!snap.HasLeader || snap.Leaves == null || snap.Leaves.Length == 0) return;
+
+            foreach (var leaf in snap.Leaves)
+            {
+                if (leaf.Geometry == null) continue;
+                try
+                {
+                    // Tạo GeometryIntent mới — COM object cũ của leaf đã stale sau Delete()
+                    var freshIntent = sheet.CreateGeometryIntent(leaf.Geometry, leaf.Intent);
+
+                    // ObjectCollection: [Point2d tại vị trí leaf, GeometryIntent]
+                    var pts = _app.TransientObjects.CreateObjectCollection();
+                    pts.Add(_app.TransientGeometry.CreatePoint2d(leaf.PosX, leaf.PosY));
+                    pts.Add(freshIntent);
+
+                    newSym.Leader.AddLeader(pts);
+                    Debug.WriteLine($"{LOG_PREFIX}   RestoreLeader: leaf ({leaf.PosX:F3},{leaf.PosY:F3}) → THÀNH CÔNG. HasRootNode={newSym.Leader.HasRootNode}");
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"{LOG_PREFIX}   RestoreLeader: leaf ({leaf.PosX:F3},{leaf.PosY:F3}) → LỖI: {ex.Message}");
+                }
+            }
+        }
+
+        /// <summary>
         /// Replace một SketchedSymbol instance: snapshot → delete → insert → restore.
         /// Phải gọi trong phạm vi Transaction đang active.
         /// </summary>
@@ -229,35 +325,22 @@ namespace SymbolReplacer.Services
             double scale = old.Scale;
             var layer    = old.Layer;
 
-            // BUG 2 FIX — Bước 1a: Capture Geometry thô từ GeometryIntent TRƯỚC khi Delete().
-            // Sau old.Delete(), GeometryIntent COM wrapper bị stale (internal pointer bị hủy).
-            // Nhưng Geometry mà nó trỏ tới (DrawingCurve, DrawingView...) KHÔNG bị xóa.
-            // → Lưu Geometry thô + Intent, sau Delete() dùng Sheet.CreateGeometryIntent()
-            //   để tạo lại GeometryIntent hợp lệ trỏ về cùng geometry.
-            object attachedRawGeometry = null;
-            object attachedRawIntent   = null;
-            try
-            {
-                var gi = old._AttachedEntity;
-                if (gi != null)
-                {
-                    attachedRawGeometry = gi.Geometry;
-                    attachedRawIntent   = gi.Intent;
-                }
-            }
-            catch { /* floating symbol — không có attachment */ }
+            // Bước 1a: Snapshot Leader (attachment + leader structure).
+            // Probe đã xác nhận:
+            //   - symbol._AttachedEntity = null với hầu hết symbols (dùng Leader mechanism)
+            //   - symbol._AttachedEntity setter ném "Value does not fall within expected range"
+            //   - Cơ chế đúng: Leader.AllLeafNodes[i].AttachedEntity + AddLeader([Point2d, GeometryIntent])
+            var leaderSnap = SnapshotLeader(old);
 
-            // Static = false: symbol tham gia cập nhật annotation (di chuyển cùng entity)
-            // Static = true : symbol cố định tại sheet coordinates
+            // Bước 1b: Static flag
             bool isStatic = false;
-            try { isStatic = old.Static; }
-            catch { }
+            try { isStatic = old.Static; } catch { }
 
-            // Snapshot prompt text trước khi xóa
+            // Bước 1c: Snapshot prompt text trước khi xóa
             var attrSnapshot = SnapshotPromptText(old);
 
             Debug.WriteLine($"{LOG_PREFIX}   Snapshot: pos=({posX:F3},{posY:F3}) rot={rot:F3} scale={scale:F3}" +
-                            $" static={isStatic} hasAttach={attachedRawGeometry != null} attrs={attrSnapshot.Count}");
+                            $" static={isStatic} hasLeader={leaderSnap.HasLeader} attrs={attrSnapshot.Count}");
 
             // ── Bước 2: Resolve definition trong document hiện tại ──
             var doc = sheet.Parent as DrawingDocument;
@@ -265,7 +348,7 @@ namespace SymbolReplacer.Services
             Debug.WriteLine($"{LOG_PREFIX}   Resolved definition: '{resolvedDef.Name}'");
 
             // ── Bước 3: Delete old instance ──
-            // Sau dòng này: attachedRawEntity vẫn valid (entity chưa bị xóa).
+            // Sau dòng này: leaf.Geometry / leaf.Intent vẫn valid (geometry chưa bị xóa).
             old.Delete();
             Debug.WriteLine($"{LOG_PREFIX}   Deleted old instance.");
 
@@ -273,35 +356,35 @@ namespace SymbolReplacer.Services
             var freshPos = _app.TransientGeometry.CreatePoint2d(posX, posY);
 
             // ── Bước 5: Build PromptStrings + Insert ──
-            // BUG 1 FIX: Truyền NameValueMap thay vì Type.Missing.
-            // Khi definition có prompt fields, Add() ném E_INVALIDARG nếu nhận Type.Missing.
-            // Điền giá trị từ snapshot vào NameValueMap → prompt text được set ngay lúc tạo.
             var promptStrings = BuildPromptStrings(resolvedDef, attrSnapshot);
             var newSym = sheet.SketchedSymbols.Add(
                 resolvedDef, freshPos, rot, scale, promptStrings);
             Debug.WriteLine($"{LOG_PREFIX}   Inserted: '{newSym.Name}'.");
 
-            // ── Bước 6: Restore Static (trước _AttachedEntity) ──
+            // ── Bước 6: Restore Static ──
             try { newSym.Static = isStatic; }
             catch (Exception ex)
             {
                 Debug.WriteLine($"{LOG_PREFIX}   CẢNH BÁO: Không restore Static: {ex.Message}");
             }
 
-            // ── Bước 7: Tái tạo GeometryIntent và gán vào symbol mới ──
-            // BUG 2 FIX: Không dùng lại GeometryIntent cũ (đã stale sau Delete()).
-            // Dùng Sheet.CreateGeometryIntent(Geometry, Intent) để tạo mới từ raw geometry.
-            if (attachedRawGeometry != null)
+            // ── Bước 7: Restore Leader (attachment + visual leader line) ──
+            // Dùng AddLeader([Point2d, GeometryIntent]) thay vì _AttachedEntity setter.
+            RestoreLeader(newSym, leaderSnap, sheet);
+
+            // ── Bước 7a: Reset Position sau AddLeader ──
+            // AddLeader() dời symbol body (ROOT) về vị trí leaf → insertion point bị lệch.
+            // Set lại Position để insertion point trở về đúng vị trí cũ.
+            if (leaderSnap.HasLeader)
             {
                 try
                 {
-                    var freshIntent = sheet.CreateGeometryIntent(attachedRawGeometry, attachedRawIntent);
-                    newSym._AttachedEntity = freshIntent;
-                    Debug.WriteLine($"{LOG_PREFIX}   GeometryIntent tái tạo thành công → symbol di chuyển cùng entity.");
+                    newSym.Position = _app.TransientGeometry.CreatePoint2d(posX, posY);
+                    Debug.WriteLine($"{LOG_PREFIX}   Position reset về ({posX:F3},{posY:F3}) sau AddLeader.");
                 }
                 catch (Exception ex)
                 {
-                    Debug.WriteLine($"{LOG_PREFIX}   CẢNH BÁO: Không restore _AttachedEntity: {ex.Message}");
+                    Debug.WriteLine($"{LOG_PREFIX}   CẢNH BÁO: Không reset Position: {ex.Message}");
                 }
             }
 

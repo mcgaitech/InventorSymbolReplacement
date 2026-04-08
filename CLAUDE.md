@@ -21,7 +21,13 @@ Sau khi đọc xong, báo cáo ngắn:
 - File nào cần làm tiếp theo
 - Có vấn đề tồn đọng nào không
 
----
+Khi user mở session mới và chưa nói gì,
+hoặc nhắn "bắt đầu" / "tiếp tục" / "hôm nay làm gì":
+
+→ Tự động đọc CLAUDE.md + CONTEXT.md + SESSION_LOG.md
+→ Báo cáo ngắn: đang ở đâu, làm gì tiếp
+→ Hỏi: "Tiếp tục hay có thay đổi?"
+→ Chờ xác nhận rồi mới làm
 
 ## 2. Quy tắc code — BẮT BUỘC
 

@@ -6,30 +6,30 @@
 ## ⚡ Trạng thái hiện tại — Đọc đây trước
 
 ```
-Phase    : Phase 6 — BUG OPEN
-Bước     : E_INVALIDARG khi Insert/Replace symbol có prompt fields — cần fix PromptStrings format
-Trạng thái: [ ] Chờ user xác nhận plan trước khi implement
+Phase    : Phase 6 — READY TO TEST
+Bước     : Fix leader restore đã implement, build PASS, chờ test trong Inventor
+Trạng thái: [ ] Đóng Inventor → dotnet build → mở lại → test replace symbol có leader
 ```
 
 ### Làm ngay tiếp theo
 > Claude Code đọc mục này và bắt đầu từ đây, không hỏi lại.
 
 ```
-BUG: SketchedSymbols.Add() ném E_INVALIDARG khi symbol có prompt fields
-  File: Services/SymbolReplaceService.cs → BuildPromptStrings()
-  Root cause: PromptStrings phải là string[] (SAFEARRAY of BSTR), KHÔNG phải NameValueMap
-  Inventor COM kiểm tra VT_ARRAY|VT_BSTR; NameValueMap là VT_DISPATCH → bị reject
+Test scenario:
+  1. Đóng Inventor → dotnet build SymbolReplacer.csproj -c Debug → mở Inventor
+  2. Mở file .idw có symbol được đặt có leader (bám vào edge/view)
+  3. Replace symbol đó sang symbol khác qua palette
+  4. Kiểm tra DebugView:
+       - Tìm "SnapshotLeader: N leaf(s)"  → phải > 0
+       - Tìm "RestoreLeader: leaf (...) → THÀNH CÔNG"
+  5. Kéo DrawingView → symbol mới phải di chuyển theo
+  6. Click insert point của symbol mới → drag → phải thấy leader line
 
-Kế hoạch đã đề xuất (chờ user confirm):
-  Option A (ưu tiên): đổi BuildPromptStrings() trả về string[] thay NameValueMap
-    - Build mảng theo thứ tự TextBox có <Prompt ReadOnlyUniqueID> trong FormattedText
-    - Value từ snapshot (replace) hoặc TextBox.Text (insert mới)
-    - Pass: (object)(new string[] { "DECK", "ABL" })
-  Option B (fallback): insert với Type.Missing, rồi SetPromptResultText() từng TextBox sau
-  Option C (quick try): thử null thay vì Type.Missing
-
-Chỉ sửa: Services/SymbolReplaceService.cs (BuildPromptStrings)
-Không sửa file nào khác
+Nếu FAIL:
+  → Kiểm tra log "RestoreLeader: leaf (...) → LỖI: ..."
+  → Nếu lỗi "Value does not fall within the expected range" tại AddLeader:
+      geometry đã stale (bị xóa cùng với old symbol?) — cần kiểm tra xem
+      leaf.Geometry có bị invalidate sau Delete() không
 ```
 
 ---
@@ -72,7 +72,7 @@ Không sửa file nào khác
 | `Services/IThumbnailService.cs` | ✅ Done | |
 | `Services/ThumbnailService.cs` | ✅ Done | GDI render + cache |
 | `Services/ISymbolReplaceService.cs` | ✅ Done | |
-| `Services/SymbolReplaceService.cs` | ✅ Done | Fixed: snapshot+restore `_AttachedEntity`+`Static`; `GetSheetFromSymbol()` simplified |
+| `Services/SymbolReplaceService.cs` | ✅ Done | Fixed: `BuildPromptStrings()` → `string[]`; Leader restore via `AddLeader([Point2d, GeometryIntent])`; xóa `_AttachedEntity` setter (không work) |
 | `Services/IConfigService.cs` | ✅ Done | |
 | `Services/ConfigService.cs` | ✅ Done | |
 | `Helpers/PictureDispConverter.cs` | ✅ Done | |
@@ -100,6 +100,44 @@ Không sửa file nào khác
 ## 🗒️ Session Log Chi Tiết
 <!-- Claude Code thêm vào ĐẦU mục này (mới nhất lên trên) -->
 <!-- Giữ lại tối đa 10 session gần nhất -->
+
+---
+### Session: 2026-04-08 (run 5) — Fix PromptStrings + Fix Leader restore
+
+**Hai bugs đã fix trong `Services/SymbolReplaceService.cs`:**
+
+#### Bug 1: E_INVALIDARG khi Insert/Replace symbol có prompt fields
+- **Root cause**: `BuildPromptStrings()` trả về `NameValueMap` (VT_DISPATCH). Inventor COM expect `string[]` (SAFEARRAY of BSTR, VT_ARRAY|VT_BSTR) → reject với E_INVALIDARG
+- **Fix**: Đổi `BuildPromptStrings()` trả về `string[]` thay `NameValueMap`
+- **Xác nhận qua probe**: `SketchedSymbols.Add()` với `string[2]` → THÀNH CÔNG
+
+#### Bug 2: Symbol mới floating sau replace (không bám vào đối tượng, không có leader)
+- **Root cause xác nhận qua probe live** (3 lần chạy với Inventor đang mở):
+  1. Tất cả 39/40 symbol: `_AttachedEntity = null`, `Leader.HasRootNode = True`
+  2. Cơ chế attach thực sự: `Leader.AllLeafNodes[i].AttachedEntity` (GeometryIntent trên leaf node)
+  3. `symbol._AttachedEntity` setter → FAIL "Value does not fall within the expected range" (code cũ silent fail)
+  4. `AddLeader([GeometryIntent])` → E_FAIL
+  5. **`AddLeader([Point2d, GeometryIntent])`** → **THÀNH CÔNG** (công thức đúng)
+  6. Sau `Add()` mới: `HasRootNode=False` → phải gọi `AddLeader` để tạo leader
+
+- **Fix**: Thêm `SnapshotLeader()` + `RestoreLeader()` + 2 struct `LeaderLeafSnapshot`/`LeaderSnapshot`
+  - Snapshot: `leaf.Position.X/Y` (doubles) + `leaf.AttachedEntity.Geometry/Intent` (raw COM refs)
+  - Restore: `sheet.CreateGeometryIntent(geo, intent)` → `AddLeader([Point2d, freshIntent])`
+  - Xóa code cũ: `_AttachedEntity` snapshot/restore (hoàn toàn không work)
+
+**Inventor API facts xác nhận qua probe (CRITICAL — đọc kỹ trước khi sửa sau này):**
+
+| Fact | Chi tiết |
+|------|---------|
+| `symbol._AttachedEntity` | Read: null cho hầu hết symbols. SET: ném exception |
+| `Leader.HasRootNode` | False sau `Add()`. True khi symbol được đặt bởi user UI |
+| `Leader.AddLeader([GeometryIntent])` | E_FAIL — thiếu Point2d |
+| `Leader.AddLeader([Point2d, GeometryIntent])` | **THÀNH CÔNG** — đây là cách duy nhất |
+| `leaf.AttachedEntity` setter | Hoạt động sau khi HasRootNode=True |
+| `leaf.Position` setter | Hoạt động sau khi HasRootNode=True |
+| Symbol #40 exception | `_AttachedEntity` có giá trị, `HasRootNode=False` — loại đặc biệt (callout?) |
+
+**Build**: PASS (0 errors). Chưa test trong Inventor (cần restart Inventor để deploy DLL mới).
 
 ---
 ### Session: 2026-04-08 (run 4) — Phân tích E_INVALIDARG PromptStrings

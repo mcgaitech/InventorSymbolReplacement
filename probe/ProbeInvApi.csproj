@@ -9,5 +9,6 @@
       <HintPath>C:\Program Files\Autodesk\Inventor 2023\Bin\Public Assemblies\Autodesk.Inventor.Interop.dll</HintPath>
       <EmbedInteropTypes>False</EmbedInteropTypes>
     </Reference>
+    <Reference Include="Microsoft.CSharp" />
   </ItemGroup>
 </Project>
