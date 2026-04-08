@@ -367,25 +367,12 @@ namespace SymbolReplacer.Services
                     return Type.Missing;
                 }
 
-                // Log toàn bộ TextBox content để hiểu format của prompt field
-                int logIdx = 0;
-                foreach (TextBox tb in sketch.TextBoxes)
-                {
-                    string rawText      = "<err>";
-                    string formattedTxt = "<err>";
-                    try { rawText      = tb.Text ?? "(null)"; }      catch (Exception ex) { rawText      = $"ERR:{ex.Message}"; }
-                    try { formattedTxt = tb.FormattedText ?? "(null)"; } catch (Exception ex) { formattedTxt = $"ERR:{ex.Message}"; }
-                    Debug.WriteLine($"{LOG_PREFIX}   TB[{logIdx}] Text='{rawText}' FormattedText='{formattedTxt}'");
-                    logIdx++;
-                }
-
-                // Inventor lưu prompt field trong FormattedText:
-                //   <Prompt ReadOnlyUniqueID='1'>DefaultText</Prompt>
-                // NVM key   = ReadOnlyUniqueID value ("1", "2", ...)
-                // NVM value = text cần điền (lấy từ snapshot khi replace, hoặc default text)
-                var nvm = _app.TransientObjects.CreateNameValueMap();
-                int nvmCount = 0;
-                int tbIdx    = 0;
+                // Inventor COM expect PromptStrings là string[] (SAFEARRAY of BSTR).
+                // NameValueMap (VT_DISPATCH) bị reject với E_INVALIDARG.
+                // VBA convention: Dim p(n) As String → p(0)="val1", p(1)="val2", ...
+                // → build List<string> theo thứ tự TextBox có prompt UID.
+                var values = new System.Collections.Generic.List<string>();
+                int tbIdx  = 0;
 
                 foreach (TextBox tb in sketch.TextBoxes)
                 {
@@ -403,11 +390,10 @@ namespace SymbolReplacer.Services
 
                         // Lấy value từ snapshot (replace), hoặc default text từ TextBox.Text
                         string snapshotKey = $"tb_{tbIdx}_{(tb.Text?.Trim() ?? string.Empty)}";
-                        string value       = tb.Text ?? string.Empty;  // default = existing text
+                        string value       = tb.Text ?? string.Empty;
                         snapshot?.TryGetValue(snapshotKey, out value);
 
-                        nvm.Add(uid, value ?? string.Empty);
-                        nvmCount++;
+                        values.Add(value ?? string.Empty);
                         Debug.WriteLine($"{LOG_PREFIX}   TB[{tbIdx}] promptUID='{uid}' value='{value}'.");
                     }
                     catch (Exception ex)
@@ -417,14 +403,14 @@ namespace SymbolReplacer.Services
                     tbIdx++;
                 }
 
-                if (nvmCount == 0)
+                if (values.Count == 0)
                 {
                     Debug.WriteLine($"{LOG_PREFIX}   BuildPromptStrings: không có prompt field → Type.Missing.");
                     return Type.Missing;
                 }
 
-                Debug.WriteLine($"{LOG_PREFIX}   BuildPromptStrings: {nvmCount} prompt entries.");
-                return nvm;
+                Debug.WriteLine($"{LOG_PREFIX}   BuildPromptStrings: {values.Count} prompt entries → string[].");
+                return values.ToArray();
             }
             catch (Exception ex)
             {
