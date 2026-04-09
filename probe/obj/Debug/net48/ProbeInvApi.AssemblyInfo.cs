@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("ProbeInvApi")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+bda49ef15847020bbb22a04636d8a82b43aeb98d")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+30d42dfc8d76c2b125358362ec44cf11277b7a57")]
 [assembly: System.Reflection.AssemblyProductAttribute("ProbeInvApi")]
 [assembly: System.Reflection.AssemblyTitleAttribute("ProbeInvApi")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

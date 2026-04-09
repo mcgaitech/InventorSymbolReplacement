@@ -8,177 +8,127 @@ class ProbeInvApi
 {
     static void Main(string[] args)
     {
-        bool liveMode = args.Length > 0 && args[0].ToLower() == "live";
-        if (!liveMode) { RunTypeMetadata(); return; }
-
-        Console.WriteLine("=== LIVE MODE ===\n");
+        Console.WriteLine("=== So sánh Native vs API symbol properties ===\n");
 
         dynamic app;
         try { app = Marshal.GetActiveObject("Inventor.Application"); }
-        catch (Exception ex) { Console.WriteLine($"Không kết nối Inventor: {ex.Message}"); return; }
-        Console.WriteLine($"✓ {app.Caption}");
+        catch { Console.WriteLine("Không kết nối Inventor."); return; }
 
-        dynamic doc;
-        try { doc = app.ActiveDocument; }
-        catch { Console.WriteLine("Không lấy được ActiveDocument."); return; }
-        if ((int)doc.DocumentType != 12292) { Console.WriteLine("Không phải DrawingDocument."); return; }
-
+        dynamic doc = app.ActiveDocument;
         dynamic sheet = doc.ActiveSheet;
-        Console.WriteLine($"✓ Sheet: '{sheet.Name}'\n");
 
-        // ── Tìm symbol nguồn có leader ────────────────────────────────────────
-        dynamic srcSym = null; dynamic srcLeaf = null;
-        foreach (dynamic s in sheet.SketchedSymbols)
+        // ── Dump TẤT CẢ properties của mỗi symbol ───────────────────────────
+        int idx = 0;
+        foreach (dynamic sym in sheet.SketchedSymbols)
         {
-            try
-            {
-                if (!(bool)s.Leader.HasRootNode) continue;
-                foreach (dynamic leaf in s.Leader.AllLeafNodes)
+            idx++;
+            if (idx > 5) break;  // chỉ dump 5 symbol đầu
+
+            Console.WriteLine($"--- Symbol #{idx}: '{sym.Name}' (def='{sym.Definition.Name}') ---");
+
+            // Properties cơ bản
+            Try(() => Console.WriteLine($"  Position     : ({(double)sym.Position.X:F4},{(double)sym.Position.Y:F4})"));
+            Try(() => Console.WriteLine($"  Rotation     : {(double)sym.Rotation:F4}"));
+            Try(() => Console.WriteLine($"  Scale        : {(double)sym.Scale:F4}"));
+            Try(() => Console.WriteLine($"  Static       : {(bool)sym.Static}"));
+
+            // Leader properties — ĐÂY LÀ KEY
+            Try(() => Console.WriteLine($"  Callout      : {(bool)sym.Callout}"));
+            Try(() => Console.WriteLine($"  LeaderVisible: {(bool)sym.LeaderVisible}"));
+            Try(() => Console.WriteLine($"  LeaderClipping: {(bool)sym.LeaderClipping}"));
+            Try(() => Console.WriteLine($"  SymbolClipping: {(bool)sym.SymbolClipping}"));
+            Try(() => Console.WriteLine($"  LeaderStyle  : {sym.LeaderStyle}"));
+
+            // _AttachedEntity
+            Try(() => {
+                var ae = sym._AttachedEntity;
+                Console.WriteLine($"  _AttachedEntity: {(ae != null ? "CÓ" : "null")}");
+            });
+
+            // Leader structure
+            Try(() => {
+                bool hasRoot = sym.Leader.HasRootNode;
+                Console.WriteLine($"  Leader.HasRootNode: {hasRoot}");
+                if (hasRoot)
                 {
-                    dynamic gi = null;
-                    try { gi = leaf.AttachedEntity; } catch { }
-                    if (gi != null) { srcSym = s; srcLeaf = leaf; break; }
-                }
-            }
-            catch { }
-            if (srcSym != null) break;
-        }
-        if (srcSym == null) { Console.WriteLine("Không tìm được symbol nguồn."); return; }
-
-        Console.WriteLine($"Nguồn: '{srcSym.Name}'  pos=({(double)srcSym.Position.X:F4},{(double)srcSym.Position.Y:F4})");
-        Console.WriteLine($"  Leaf: ({(double)srcLeaf.Position.X:F4},{(double)srcLeaf.Position.Y:F4})");
-
-        dynamic srcGeo = null; dynamic srcIntent = null;
-        try { srcGeo    = srcLeaf.AttachedEntity.Geometry; }  catch { }
-        try { srcIntent = srcLeaf.AttachedEntity.Intent; }    catch { }
-
-        object promptStrings = BuildPromptStrings(srcSym.Definition);
-
-        // ── 4 tests trong cùng 1 transaction (abort ở cuối) ──────────────────
-        dynamic tx = null;
-        try { tx = app.TransactionManager.StartTransaction(doc, "ProbeLeaderTest"); Console.WriteLine("✓ Transaction started\n"); }
-        catch (Exception ex) { Console.WriteLine($"✗ Transaction: {ex.Message}"); }
-
-        try
-        {
-            // Tạo freshIntent BÊN TRONG transaction
-            dynamic freshIntent = null;
-            try
-            {
-                freshIntent = sheet.CreateGeometryIntent(srcGeo, srcIntent);
-                Console.WriteLine($"✓ CreateGeometryIntent() BÊN TRONG transaction → THÀNH CÔNG");
-            }
-            catch (Exception ex) { Console.WriteLine($"✗ CreateGeometryIntent() inside tx: {ex.Message}"); }
-
-            // Add symbol mới
-            double testX = (double)srcSym.Position.X + 5.0;
-            double testY = (double)srcSym.Position.Y;
-            dynamic newSym = sheet.SketchedSymbols.Add(
-                srcSym.Definition,
-                app.TransientGeometry.CreatePoint2d(testX, testY),
-                (double)srcSym.Rotation, (double)srcSym.Scale,
-                promptStrings);
-            Console.WriteLine($"✓ Add() THÀNH CÔNG: '{newSym.Name}'");
-
-            bool hasRoot = false;
-            try { hasRoot = (bool)newSym.Leader.HasRootNode; } catch { }
-            Console.WriteLine($"  Leader.HasRootNode = {hasRoot}\n");
-
-            // ── Test 1: _AttachedEntity setter ────────────────────────────────
-            Console.WriteLine("=== Test 1: newSym._AttachedEntity = freshIntent ===");
-            if (freshIntent != null)
-            {
-                try
-                {
-                    newSym._AttachedEntity = freshIntent;
-                    bool hasAtt = false;
-                    try { hasAtt = !IsNull(newSym._AttachedEntity); } catch { }
-                    bool nowHasRoot = false;
-                    try { nowHasRoot = (bool)newSym.Leader.HasRootNode; } catch { }
-                    Console.WriteLine($"  ✓ _AttachedEntity SET → hasAtt={hasAtt}  HasRootNode={nowHasRoot}");
-                }
-                catch (Exception ex) { Console.WriteLine($"  ✗ _AttachedEntity: {ex.Message}"); }
-            }
-
-            // ── Test 2: AddLeader([Point2d, GeometryIntent]) ──────────────────
-            Console.WriteLine("\n=== Test 2: AddLeader([Point2d, GeometryIntent]) ===");
-            if (freshIntent != null)
-            {
-                try
-                {
-                    // Tạo freshIntent2 riêng cho test này
-                    dynamic gi2 = sheet.CreateGeometryIntent(srcGeo, srcIntent);
-                    var pts2 = app.TransientObjects.CreateObjectCollection();
-                    pts2.Add(app.TransientGeometry.CreatePoint2d(
-                        (double)srcLeaf.Position.X, (double)srcLeaf.Position.Y));
-                    pts2.Add(gi2);
-                    newSym.Leader.AddLeader(pts2);
-                    Console.WriteLine($"  ✓ AddLeader([Point2d, GeometryIntent]) THÀNH CÔNG");
-                    Console.WriteLine($"    HasRootNode sau: {(bool)newSym.Leader.HasRootNode}");
-                }
-                catch (Exception ex) { Console.WriteLine($"  ✗ [Point2d, GeometryIntent]: {ex.Message}"); }
-            }
-
-            // ── Test 3: AddLeader([GeometryIntent]) — sau khi đã set _AttachedEntity ──
-            Console.WriteLine("\n=== Test 3: AddLeader([GeometryIntent]) (fresh symbol, fresh intent) ===");
-            dynamic newSym2 = sheet.SketchedSymbols.Add(
-                srcSym.Definition,
-                app.TransientGeometry.CreatePoint2d(testX + 5.0, testY),
-                (double)srcSym.Rotation, (double)srcSym.Scale,
-                BuildPromptStrings(srcSym.Definition));
-            Console.WriteLine($"  Add() symbol2: '{newSym2.Name}'  HasRootNode={(bool)newSym2.Leader.HasRootNode}");
-            try
-            {
-                dynamic gi3 = sheet.CreateGeometryIntent(srcGeo, srcIntent);
-                var pts3 = app.TransientObjects.CreateObjectCollection();
-                pts3.Add(gi3);
-                newSym2.Leader.AddLeader(pts3);
-                Console.WriteLine($"  ✓ AddLeader([GeometryIntent]) THÀNH CÔNG  HasRootNode={(bool)newSym2.Leader.HasRootNode}");
-            }
-            catch (Exception ex) { Console.WriteLine($"  ✗ AddLeader([GeometryIntent]): {ex.Message}"); }
-
-            // ── Test 4: Gán leaf.AttachedEntity trực tiếp bằng srcLeaf.AttachedEntity ──
-            Console.WriteLine("\n=== Test 4: leaf.AttachedEntity = srcLeaf.AttachedEntity (nếu HasRootNode=True) ===");
-            try
-            {
-                bool hr = (bool)newSym.Leader.HasRootNode;
-                Console.WriteLine($"  newSym.Leader.HasRootNode = {hr}");
-                if (hr)
-                {
-                    foreach (dynamic leaf in newSym.Leader.AllLeafNodes)
+                    Try(() => Console.WriteLine($"  Leader.ArrowheadType: {sym.Leader.ArrowheadType}"));
+                    int leafIdx = 0;
+                    foreach (dynamic leaf in sym.Leader.AllLeafNodes)
                     {
-                        Console.WriteLine($"  Leaf before: pos=({(double)leaf.Position.X:F4},{(double)leaf.Position.Y:F4})  att={(IsNull(leaf.AttachedEntity) ? "null" : "CÓ")}");
-                        try
-                        {
-                            dynamic gi4 = sheet.CreateGeometryIntent(srcGeo, srcIntent);
-                            leaf.AttachedEntity = gi4;
-                            Console.WriteLine($"  ✓ leaf.AttachedEntity SET  att={(IsNull(leaf.AttachedEntity) ? "null" : "CÓ")}");
-                        }
-                        catch (Exception ex) { Console.WriteLine($"  ✗ leaf.AttachedEntity: {ex.Message}"); }
-                        try
-                        {
-                            leaf.Position = app.TransientGeometry.CreatePoint2d(
-                                (double)srcLeaf.Position.X, (double)srcLeaf.Position.Y);
-                            Console.WriteLine($"  ✓ leaf.Position SET → ({(double)leaf.Position.X:F4},{(double)leaf.Position.Y:F4})");
-                        }
-                        catch (Exception ex) { Console.WriteLine($"  ✗ leaf.Position: {ex.Message}"); }
-                        break;
+                        double lx = leaf.Position.X, ly = leaf.Position.Y;
+                        bool hasAtt = false;
+                        Try(() => { hasAtt = leaf.AttachedEntity != null; });
+                        Console.WriteLine($"  Leaf[{leafIdx}]: ({lx:F4},{ly:F4}) att={hasAtt}");
+                        leafIdx++;
                     }
                 }
-                else Console.WriteLine("  HasRootNode=False, bỏ qua test 4.");
-            }
-            catch (Exception ex) { Console.WriteLine($"  ✗ Test 4: {ex.Message}"); }
+            });
+
+            // LineType, LineWeight, Color
+            Try(() => Console.WriteLine($"  LineType     : {sym.LineType}"));
+            Try(() => Console.WriteLine($"  LineWeight   : {(double)sym.LineWeight:F4}"));
+
+            Console.WriteLine();
         }
-        catch (Exception ex) { Console.WriteLine($"\n✗ Outer test THẤT BẠI: {ex.Message}"); }
-        finally
+
+        // ── Tạo API symbol để so sánh ────────────────────────────────────────
+        Console.WriteLine("=== Tạo API symbol để so sánh ===\n");
+
+        // Tìm definition + geometry
+        dynamic testDef = null;
+        foreach (dynamic def in doc.SketchedSymbolDefinitions) { testDef = def; break; }
+        if (testDef == null) { Console.WriteLine("Không có definition."); return; }
+
+        dynamic drawCurve = null;
+        foreach (dynamic view in sheet.DrawingViews)
         {
-            if (tx != null)
+            foreach (dynamic c in view.DrawingCurves) { drawCurve = c; break; }
+            break;
+        }
+
+        object prompts = BuildPromptStrings(testDef);
+
+        dynamic tx = app.TransactionManager.StartTransaction(doc, "ProbeCompare");
+        try
+        {
+            dynamic pos = app.TransientGeometry.CreatePoint2d(5.0, 5.0);
+            dynamic newSym = sheet.SketchedSymbols.Add(testDef, pos, 0.0, 1.0, prompts);
+            Console.WriteLine($"API Symbol: '{newSym.Name}'");
+
+            // Dump TRƯỚC AddLeader
+            Console.WriteLine("\n  TRƯỚC AddLeader:");
+            Try(() => Console.WriteLine($"    Callout      : {(bool)newSym.Callout}"));
+            Try(() => Console.WriteLine($"    LeaderVisible: {(bool)newSym.LeaderVisible}"));
+            Try(() => Console.WriteLine($"    HasRootNode  : {(bool)newSym.Leader.HasRootNode}"));
+
+            // AddLeader
+            if (drawCurve != null)
             {
-                try { tx.Abort(); Console.WriteLine("\n✓ Transaction ABORTED — undo mọi thay đổi"); }
-                catch (Exception ex) { Console.WriteLine($"✗ Abort: {ex.Message}"); }
+                dynamic gi = sheet.CreateGeometryIntent(drawCurve, pos);
+                var pts = app.TransientObjects.CreateObjectCollection();
+                pts.Add(pos);
+                pts.Add(gi);
+                newSym.Leader.AddLeader(pts);
+
+                Console.WriteLine("\n  SAU AddLeader:");
+                Try(() => Console.WriteLine($"    Callout      : {(bool)newSym.Callout}"));
+                Try(() => Console.WriteLine($"    LeaderVisible: {(bool)newSym.LeaderVisible}"));
+                Try(() => Console.WriteLine($"    HasRootNode  : {(bool)newSym.Leader.HasRootNode}"));
+                Try(() => Console.WriteLine($"    ArrowheadType: {newSym.Leader.ArrowheadType}"));
+
+                // Thử set LeaderVisible = true
+                Try(() => { newSym.LeaderVisible = true; Console.WriteLine($"    Set LeaderVisible=true → OK"); });
+                Try(() => Console.WriteLine($"    LeaderVisible sau set: {(bool)newSym.LeaderVisible}"));
+
+                // Thử set Callout (read-only?)
+                Try(() => { newSym.Callout = true; Console.WriteLine($"    Set Callout=true → OK"); });
             }
         }
+        catch (Exception ex) { Console.WriteLine($"LỖI: {ex.Message}"); }
+        finally { Try(() => tx.Abort()); Console.WriteLine("\n✓ Transaction ABORTED."); }
     }
+
+    static void Try(Action a) { try { a(); } catch (Exception ex) { Console.WriteLine($"    ERR: {ex.Message}"); } }
 
     static object BuildPromptStrings(dynamic def)
     {
@@ -198,25 +148,5 @@ class ProbeInvApi
             return values.Count == 0 ? (object)Type.Missing : values.ToArray();
         }
         catch { return Type.Missing; }
-    }
-
-    static bool IsNull(object o)
-    {
-        if (o == null) return true;
-        try { return o is System.Reflection.Missing; } catch { return false; }
-    }
-
-    static void RunTypeMetadata()
-    {
-        var asm = Assembly.LoadFrom(
-            @"C:\Program Files\Autodesk\Inventor 2023\Bin\Public Assemblies\Autodesk.Inventor.Interop.dll");
-        Console.WriteLine("=== SketchedSymbol members ===");
-        foreach (var m in asm.GetType("Inventor.SketchedSymbol")
-                              .GetMembers(BindingFlags.Public | BindingFlags.Instance).OrderBy(x => x.Name))
-        {
-            if (m is PropertyInfo pi) Console.WriteLine($"  PROP   {pi.PropertyType.Name,-30} {pi.Name}");
-            else if (m is MethodInfo mi && !mi.IsSpecialName)
-                Console.WriteLine($"  METHOD {mi.ReturnType.Name,-30} {mi.Name}({string.Join(", ", mi.GetParameters().Select(p => p.ParameterType.Name + " " + p.Name))})");
-        }
     }
 }

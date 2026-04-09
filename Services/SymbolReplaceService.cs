@@ -174,13 +174,14 @@ namespace SymbolReplacer.Services
         }
 
         public bool InsertSymbol(Sheet sheet, SketchedSymbolDefinition definition, Point2d position,
-                                 double rotation = 0.0, double scale = 1.0)
+                                 double rotation = 0.0, double scale = 1.0, object attachGeometry = null)
         {
             if (sheet      == null) throw new ArgumentNullException(nameof(sheet));
             if (definition == null) throw new ArgumentNullException(nameof(definition));
             if (position   == null) throw new ArgumentNullException(nameof(position));
 
-            Debug.WriteLine($"{LOG_PREFIX} InsertSymbol: '{definition.Name}' tại ({position.X:F3},{position.Y:F3}) rot={rotation:F3}rad scale={scale:F3}");
+            Debug.WriteLine($"{LOG_PREFIX} InsertSymbol: '{definition.Name}' tại ({position.X:F3},{position.Y:F3})" +
+                            $" rot={rotation:F3}rad scale={scale:F3} hasGeometry={attachGeometry != null}");
 
             var doc = sheet.Parent as DrawingDocument;
             if (doc == null)
@@ -192,14 +193,38 @@ namespace SymbolReplacer.Services
             // Resolve definition trong active document (tránh cross-doc reference)
             var resolvedDef = ResolveDefinitionInDocument(doc, definition);
 
-            // BUG 1 FIX: Truyền NameValueMap thay vì Type.Missing.
-            // Khi definition có prompt fields, Add() ném E_INVALIDARG nếu nhận Type.Missing.
             var promptStrings = BuildPromptStrings(resolvedDef);
 
             var tx = _app.TransactionManager.StartTransaction((_Document)doc, "Insert Symbol");
             try
             {
                 var newSym = sheet.SketchedSymbols.Add(resolvedDef, position, rotation, scale, promptStrings);
+                Debug.WriteLine($"{LOG_PREFIX}   Add() THÀNH CÔNG: '{newSym.Name}'");
+
+                // Tìm geometry để attach leader:
+                //   - attachGeometry != null → dùng trực tiếp (từ SelectEvents)
+                //   - attachGeometry == null → tự tìm DrawingCurve gần nhất (MouseEvents + snap)
+                //     Nếu tìm được curve gần (< 0.5cm) → attached; không → floating
+                object geoToAttach = attachGeometry;
+                if (geoToAttach == null)
+                {
+                    var nearestCurve = FindNearestDrawingCurve(sheet, position);
+                    if (nearestCurve != null)
+                    {
+                        geoToAttach = nearestCurve;
+                        Debug.WriteLine($"{LOG_PREFIX}   Auto-resolved DrawingCurve gần snap position.");
+                    }
+                    else
+                    {
+                        Debug.WriteLine($"{LOG_PREFIX}   Không tìm được geometry gần → floating insert.");
+                    }
+                }
+
+                if (geoToAttach != null)
+                {
+                    AttachLeaderToGeometry(newSym, sheet, geoToAttach, position);
+                }
+
                 tx.End();
                 Debug.WriteLine($"{LOG_PREFIX} InsertSymbol THÀNH CÔNG: '{newSym.Name}'");
                 return true;
@@ -230,6 +255,240 @@ namespace SymbolReplacer.Services
         {
             public bool HasLeader;
             public LeaderLeafSnapshot[] Leaves;  // thường chỉ có 1 leaf
+        }
+
+        /// <summary>
+        /// Tạo leader bám vào geometry cho symbol vừa insert.
+        /// Thử nhiều intent format cho CreateGeometryIntent (Point2d → Type.Missing → 1-arg).
+        /// Nếu tất cả fail → symbol giữ nguyên floating, log cảnh báo.
+        /// </summary>
+        private void AttachLeaderToGeometry(SketchedSymbol newSym, Sheet sheet,
+                                             object geometry, Point2d position)
+        {
+            string geoType = "<unknown>";
+            try { geoType = geometry.GetType().Name; } catch { }
+            Debug.WriteLine($"{LOG_PREFIX}   AttachLeader: geometry={geoType} pos=({position.X:F3},{position.Y:F3})");
+
+            // Xác định COM type thực sự qua ObjectTypeEnum (.Type property)
+            int comTypeEnum = 0;
+            try
+            {
+                comTypeEnum = (int)geometry.GetType().InvokeMember("Type",
+                    System.Reflection.BindingFlags.GetProperty, null, geometry, null);
+                Debug.WriteLine($"{LOG_PREFIX}   COM ObjectTypeEnum = {comTypeEnum}");
+            }
+            catch { Debug.WriteLine($"{LOG_PREFIX}   Không đọc được .Type property."); }
+
+            // Resolve geometry → cần DrawingCurve hoặc SketchLine (probe xác nhận cả 2 work)
+            // Probe xác nhận:
+            //   - kDrawingCurveSegmentObject → cần .Parent (DrawingCurve)
+            //   - kDrawingSketchObject (117443328) → SelectEvents trả về DrawingSketch container
+            //     khi pick sketch line → cần tìm SketchLine gần nhất bên trong
+            //   - SketchLine → dùng trực tiếp
+            //   - DrawingCurve → dùng trực tiếp
+            object resolvedGeo = geometry;
+
+            if (comTypeEnum == 117443328)  // kDrawingSketchObject
+            {
+                // SelectEvents trả về DrawingSketch (container) thay vì SketchLine cụ thể.
+                // SketchLine dùng sketch coordinates (model units) ≠ sheet coordinates.
+                // → Tìm DrawingCurve gần nhất trong view bằng sheet coordinates (đúng hệ tọa độ).
+                Debug.WriteLine($"{LOG_PREFIX}   DrawingSketch detected → tìm DrawingCurve gần nhất (sheet coords)...");
+                resolvedGeo = FindNearestDrawingCurve(sheet, position) ?? geometry;
+            }
+            else if (comTypeEnum == 117478144)  // kDrawingCurveSegmentObject
+            {
+                // DrawingCurveSegment → cần Parent (DrawingCurve)
+                try
+                {
+                    var seg = (DrawingCurveSegment)geometry;
+                    resolvedGeo = seg.Parent;
+                    Debug.WriteLine($"{LOG_PREFIX}   DrawingCurveSegment → Parent DrawingCurve.");
+                }
+                catch
+                {
+                    // COM cast fail → thử InvokeMember
+                    try
+                    {
+                        resolvedGeo = geometry.GetType().InvokeMember("Parent",
+                            System.Reflection.BindingFlags.GetProperty, null, geometry, null) ?? geometry;
+                        Debug.WriteLine($"{LOG_PREFIX}   DrawingCurveSegment (InvokeMember) → Parent.");
+                    }
+                    catch { Debug.WriteLine($"{LOG_PREFIX}   CẢNH BÁO: Không lấy được Parent."); }
+                }
+            }
+            else
+            {
+                Debug.WriteLine($"{LOG_PREFIX}   TypeEnum={comTypeEnum} → dùng trực tiếp.");
+            }
+
+            // Tạo GeometryIntent — thử Point2d intent trước, fallback Type.Missing
+            GeometryIntent gi = null;
+            try
+            {
+                gi = sheet.CreateGeometryIntent(resolvedGeo, position);
+                Debug.WriteLine($"{LOG_PREFIX}   CreateGeometryIntent(resolvedGeo, Point2d) → OK");
+            }
+            catch (Exception ex1)
+            {
+                Debug.WriteLine($"{LOG_PREFIX}   CreateGeometryIntent(resolvedGeo, Point2d) → FAIL: {ex1.Message}");
+                try
+                {
+                    gi = sheet.CreateGeometryIntent(resolvedGeo, Type.Missing);
+                    Debug.WriteLine($"{LOG_PREFIX}   CreateGeometryIntent(resolvedGeo, Missing) → OK");
+                }
+                catch (Exception ex2)
+                {
+                    Debug.WriteLine($"{LOG_PREFIX}   CreateGeometryIntent FAIL cả 2 → symbol floating: {ex2.Message}");
+                    return;
+                }
+            }
+
+            // AddLeader: [Point2d, GeometryIntent] — probe xác nhận
+            // Retry logic: thử geometry trực tiếp → nếu fail, thử .Parent
+            // (COM __ComObject không cast được bằng 'is' → phải thử runtime)
+            if (!TryAddLeader(newSym, sheet, resolvedGeo, position))
+            {
+                // Lần 2: thử .Parent (DrawingCurveSegment.Parent = DrawingCurve)
+                object parentGeo = null;
+                try
+                {
+                    parentGeo = resolvedGeo.GetType().InvokeMember("Parent",
+                        System.Reflection.BindingFlags.GetProperty, null, resolvedGeo, null);
+                }
+                catch { }
+
+                if (parentGeo != null)
+                {
+                    Debug.WriteLine($"{LOG_PREFIX}   Retry với Parent geometry...");
+                    TryAddLeader(newSym, sheet, parentGeo, position);
+                }
+                else
+                {
+                    Debug.WriteLine($"{LOG_PREFIX}   Không có Parent → symbol floating.");
+                }
+            }
+        }
+
+        /// <summary>
+        /// Tìm DrawingCurve gần nhất với position (sheet coordinates) từ tất cả DrawingViews.
+        /// Khi SelectEvents trả về DrawingSketch (container), cần resolve ra DrawingCurve cụ thể
+        /// vì AddLeader chấp nhận DrawingCurve nhưng KHÔNG chấp nhận DrawingSketch.
+        /// DrawingCurveSegment.StartPoint/EndPoint dùng sheet coordinates → so sánh chính xác.
+        /// </summary>
+        /// <summary>Ngưỡng khoảng cách tối đa (cm) để coi là "gần" geometry → attached insert.</summary>
+        private const double ATTACH_DISTANCE_THRESHOLD = 0.5;
+
+        private object FindNearestDrawingCurve(Sheet sheet, Point2d position)
+        {
+            try
+            {
+                object nearest = null;
+                double minDist = double.MaxValue;
+
+                foreach (DrawingView view in sheet.DrawingViews)
+                {
+                    foreach (DrawingCurve curve in view.DrawingCurves)
+                    {
+                        try
+                        {
+                            foreach (DrawingCurveSegment seg in curve.Segments)
+                            {
+                                try
+                                {
+                                    double sx = seg.StartPoint.X, sy = seg.StartPoint.Y;
+                                    double ex = seg.EndPoint.X,   ey = seg.EndPoint.Y;
+                                    double dist = PointToSegmentDistance(position.X, position.Y, sx, sy, ex, ey);
+
+                                    if (dist < minDist)
+                                    {
+                                        minDist = dist;
+                                        nearest = curve;  // DrawingCurve, KHÔNG phải segment
+                                    }
+                                }
+                                catch { }
+                            }
+                        }
+                        catch { }
+                    }
+                }
+
+                if (nearest != null && minDist <= ATTACH_DISTANCE_THRESHOLD)
+                {
+                    Debug.WriteLine($"{LOG_PREFIX}   FindNearestDrawingCurve: dist={minDist:F4} ≤ {ATTACH_DISTANCE_THRESHOLD} → attached.");
+                    return nearest;
+                }
+
+                Debug.WriteLine($"{LOG_PREFIX}   FindNearestDrawingCurve: {(nearest != null ? $"dist={minDist:F4} > threshold" : "không có curve")} → floating.");
+                return null;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"{LOG_PREFIX}   FindNearestDrawingCurve LỖI: {ex.Message}");
+                return null;
+            }
+        }
+
+        /// <summary>Khoảng cách từ điểm (px,py) đến đoạn thẳng (sx,sy)→(ex,ey).</summary>
+        private static double PointToSegmentDistance(double px, double py,
+                                                     double sx, double sy,
+                                                     double ex, double ey)
+        {
+            double dx = ex - sx, dy = ey - sy;
+            double lenSq = dx * dx + dy * dy;
+            if (lenSq < 1e-20) return Math.Sqrt((px - sx) * (px - sx) + (py - sy) * (py - sy));
+
+            double t = Math.Max(0, Math.Min(1, ((px - sx) * dx + (py - sy) * dy) / lenSq));
+            double projX = sx + t * dx, projY = sy + t * dy;
+            return Math.Sqrt((px - projX) * (px - projX) + (py - projY) * (py - projY));
+        }
+
+        /// <summary>
+        /// Thử tạo GeometryIntent + AddLeader cho 1 geometry cụ thể.
+        /// Trả về true nếu thành công, false nếu fail (caller sẽ retry với geometry khác).
+        /// </summary>
+        private bool TryAddLeader(SketchedSymbol newSym, Sheet sheet, object geo, Point2d position)
+        {
+            GeometryIntent gi = null;
+            try
+            {
+                gi = sheet.CreateGeometryIntent(geo, position);
+            }
+            catch
+            {
+                try { gi = sheet.CreateGeometryIntent(geo, Type.Missing); }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"{LOG_PREFIX}   TryAddLeader: CreateGeometryIntent FAIL: {ex.Message}");
+                    return false;
+                }
+            }
+
+            try
+            {
+                var pts = _app.TransientObjects.CreateObjectCollection();
+                pts.Add(position);
+                pts.Add(gi);
+                newSym.Leader.AddLeader(pts);
+
+                // Reset Position về đúng vị trí pick (AddLeader có thể dời symbol)
+                newSym.Position = position;
+
+                // Set leader properties
+                try { newSym.LeaderVisible  = true;  } catch { }
+                try { newSym.LeaderClipping = true;  } catch { }
+                try { newSym.SymbolClipping = false;  } catch { }
+                // Filled solid đen giống dimension arrows
+                try { newSym.Leader.ArrowheadType = ArrowheadTypeEnum.kFilledArrowheadType; } catch { }
+
+                Debug.WriteLine($"{LOG_PREFIX}   TryAddLeader THÀNH CÔNG. HasRootNode={newSym.Leader.HasRootNode}");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"{LOG_PREFIX}   TryAddLeader AddLeader FAIL: {ex.Message}");
+                return false;
+            }
         }
 
         /// <summary>
@@ -301,6 +560,12 @@ namespace SymbolReplacer.Services
                     pts.Add(freshIntent);
 
                     newSym.Leader.AddLeader(pts);
+
+                    // Set leader properties giống native symbol
+                    try { newSym.LeaderVisible  = true;  } catch { }
+                    try { newSym.LeaderClipping = true;  } catch { }
+                    try { newSym.SymbolClipping = false;  } catch { }
+
                     Debug.WriteLine($"{LOG_PREFIX}   RestoreLeader: leaf ({leaf.PosX:F3},{leaf.PosY:F3}) → THÀNH CÔNG. HasRootNode={newSym.Leader.HasRootNode}");
                 }
                 catch (Exception ex)

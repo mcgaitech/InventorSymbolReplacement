@@ -34,8 +34,8 @@ namespace SymbolReplacer.Controllers
         /// <summary>Raised khi pick mode kết thúc (picked hoặc ESC).</summary>
         public event EventHandler PickModeCancelled;
 
-        /// <summary>Raised khi user click điểm trên bản vẽ trong insert mode.</summary>
-        public event EventHandler<Point2d> InsertPointPicked;
+        /// <summary>Raised khi user pick geometry trên bản vẽ trong insert mode.</summary>
+        public event EventHandler<InsertPickEventArgs> InsertPointPicked;
 
         /// <summary>Raised khi insert mode kết thúc do ESC.</summary>
         public event EventHandler InsertModeCancelled;
@@ -95,8 +95,11 @@ namespace SymbolReplacer.Controllers
         }
 
         /// <summary>
-        /// Bắt đầu insert mode — chờ user click điểm trên bản vẽ để đặt symbol.
-        /// Dùng PointEvents thay vì SelectEvents.
+        /// Bắt đầu insert mode — dual mode:
+        ///   - SelectEvents: pick trên geometry → attached insert (entity highlight + snap)
+        ///   - MouseEvents: click vùng trống → service tự tìm DrawingCurve gần nhất
+        ///     Nếu gần geometry → attached; xa → floating
+        /// Cả 2 path đều gửi position (đã snap) + entity (có thể null) → InsertSymbol xử lý.
         /// </summary>
         public void EnterInsertMode()
         {
@@ -107,20 +110,31 @@ namespace SymbolReplacer.Controllers
             try
             {
                 _interactionEvents = _app.CommandManager.CreateInteractionEvents();
-                _interactionEvents.StatusBarText = "Click to place symbol — press ESC to cancel";
+                _interactionEvents.StatusBarText = "Pick geometry to attach, or click empty area for floating — ESC to cancel";
                 _interactionEvents.OnTerminate   += OnInteractionTerminate;
 
-                // Dùng MouseEvents.OnMouseClick để nhận tọa độ click trên bản vẽ
-                // QUAN TRỌNG: lưu vào field _mouseEvents (không dùng local var) để tránh COM GC
+                // SelectEvents: pick geometry → entity highlight khi hover + snap
+                _selectEvents = _interactionEvents.SelectEvents;
+                _selectEvents.AddSelectionFilter(SelectionFilterEnum.kDrawingCurveSegmentFilter);
+                _selectEvents.AddSelectionFilter(SelectionFilterEnum.kDrawingCenterlineFilter);
+                _selectEvents.AddSelectionFilter(SelectionFilterEnum.kDrawingCentermarkFilter);
+                _selectEvents.AddSelectionFilter(SelectionFilterEnum.kSketchCurveFilter);
+                _selectEvents.AddSelectionFilter(SelectionFilterEnum.kSketchPointFilter);
+                _selectEvents.AddSelectionFilter(SelectionFilterEnum.kWorkPointFilter);
+                _selectEvents.AddSelectionFilter(SelectionFilterEnum.kDrawingSketchedSymbolFilter);
+                _selectEvents.SingleSelectEnabled = true;
+                _selectEvents.OnSelect += OnInsertGeometrySelected;
+
+                // MouseEvents: click vùng trống (SelectEvents không match)
                 _mouseEvents = _interactionEvents.MouseEvents;
                 _mouseEvents.MouseMoveEnabled = false;
-                _mouseEvents.OnMouseClick += OnInsertMouseClick;
+                _mouseEvents.OnMouseClick += OnInsertMouseClickWithSnap;
 
                 _interactionEvents.Start();
                 _isActive = true;
                 _isInsertMode = true;
 
-                Debug.WriteLine($"{LOG_PREFIX} Insert mode ACTIVE.");
+                Debug.WriteLine($"{LOG_PREFIX} Insert mode ACTIVE (SelectEvents + MouseEvents dual mode).");
             }
             catch (Exception ex)
             {
@@ -189,19 +203,41 @@ namespace SymbolReplacer.Controllers
             SymbolPicked?.Invoke(this, picked);
         }
 
-        private void OnInsertMouseClick(
+        private void OnInsertGeometrySelected(
+            ObjectsEnumerator justSelectedEntities,
+            SelectionDeviceEnum selectionDevice,
+            Point modelPosition,
+            Point2d viewPosition,
+            View view)
+        {
+            Debug.WriteLine($"{LOG_PREFIX} OnInsertGeometrySelected: ({modelPosition.X:F3}, {modelPosition.Y:F3})");
+
+            Point2d pos2d;
+            try { pos2d = _app.TransientGeometry.CreatePoint2d(modelPosition.X, modelPosition.Y); }
+            catch { return; }
+
+            StopInteraction();
+
+            // Gửi position + null geometry → service tự tìm DrawingCurve gần nhất
+            // (entity từ SelectEvents không đáng tin — DrawingSketch, __ComObject, cast fail)
+            var args = new InsertPickEventArgs(pos2d, null);
+            InsertPointPicked?.Invoke(this, args);
+        }
+
+        /// <summary>
+        /// MouseEvents handler — click vùng trống (SelectEvents không match entity nào).
+        /// </summary>
+        private void OnInsertMouseClickWithSnap(
             MouseButtonEnum button,
             ShiftStateEnum shiftKeys,
             Point modelPosition,
             Point2d viewPosition,
             View view)
         {
-            // Chỉ xử lý left-click
             if (button != MouseButtonEnum.kLeftMouseButton) return;
 
-            Debug.WriteLine($"{LOG_PREFIX} OnInsertMouseClick: ({modelPosition.X:F3}, {modelPosition.Y:F3})");
+            Debug.WriteLine($"{LOG_PREFIX} OnInsertMouseClickWithSnap: ({modelPosition.X:F3}, {modelPosition.Y:F3})");
 
-            // modelPosition là Point 3D nhưng trong Drawing thì Z=0, X/Y là sheet coords
             Point2d pos2d;
             try
             {
@@ -209,12 +245,15 @@ namespace SymbolReplacer.Controllers
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"{LOG_PREFIX} LỖI tạo Point2d: {ex.Message}");
+                Debug.WriteLine($"{LOG_PREFIX}   LỖI tạo Point2d: {ex.Message}");
                 return;
             }
 
-            StopInteraction();      // kết thúc mode trước khi raise event
-            InsertPointPicked?.Invoke(this, pos2d);
+            StopInteraction();
+
+            // PickedGeometry = null — service sẽ tự tìm DrawingCurve gần nhất
+            var args = new InsertPickEventArgs(pos2d, null);
+            InsertPointPicked?.Invoke(this, args);
         }
 
         private void OnInteractionTerminate()
@@ -237,6 +276,8 @@ namespace SymbolReplacer.Controllers
 
         // ─── Private: Cleanup interaction ─────────────────────────────────────
 
+        // ─── Private: Cleanup + StopInteraction ──────────────────────────────
+
         private void StopInteraction()
         {
             if (!_isActive && _interactionEvents == null) return;
@@ -248,6 +289,7 @@ namespace SymbolReplacer.Controllers
                 if (_selectEvents != null)
                 {
                     _selectEvents.OnSelect -= OnSymbolSelected;
+                    _selectEvents.OnSelect -= OnInsertGeometrySelected;
                     _selectEvents = null;
                 }
             }
@@ -260,7 +302,7 @@ namespace SymbolReplacer.Controllers
             {
                 if (_mouseEvents != null)
                 {
-                    _mouseEvents.OnMouseClick -= OnInsertMouseClick;
+                    _mouseEvents.OnMouseClick -= OnInsertMouseClickWithSnap;
                     _mouseEvents = null;
                 }
             }
@@ -274,7 +316,6 @@ namespace SymbolReplacer.Controllers
                 if (_interactionEvents != null)
                 {
                     _interactionEvents.OnTerminate -= OnInteractionTerminate;
-                    // Bọc Stop() trong try riêng — có thể throw khi Inventor đang shutdown
                     try { _interactionEvents.Stop(); } catch { }
                     _interactionEvents = null;
                 }
@@ -286,6 +327,27 @@ namespace SymbolReplacer.Controllers
 
             _isActive     = false;
             _isInsertMode = false;
+        }
+    }
+
+    /// <summary>
+    /// Event args cho Insert mode — mang cả vị trí pick và geometry entity để tạo leader.
+    /// </summary>
+    public class InsertPickEventArgs : EventArgs
+    {
+        /// <summary>Vị trí pick trên sheet (sheet coordinates).</summary>
+        public Point2d Position { get; }
+
+        /// <summary>
+        /// Geometry entity mà user pick (DrawingCurveSegment, etc.).
+        /// Null nếu user click vào vùng trống (floating insert).
+        /// </summary>
+        public object PickedGeometry { get; }
+
+        public InsertPickEventArgs(Point2d position, object pickedGeometry = null)
+        {
+            Position = position;
+            PickedGeometry = pickedGeometry;
         }
     }
 }

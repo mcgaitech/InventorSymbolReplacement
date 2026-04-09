@@ -1,85 +1,105 @@
 @echo off
 chcp 65001 >nul
-:: deploy.bat — Build, deploy, restart Inventor
-:: Không cần PowerShell, không cần quyền admin
-:: Chạy bằng cách double-click hoặc Claude Code gọi tự động
+setlocal EnableDelayedExpansion
 
-:: ════════════════════════════════════════════
-:: CẤU HÌNH — sửa nếu Inventor cài ở ổ khác
-:: ════════════════════════════════════════════
-set INVENTOR_EXE=C:\Program Files\Autodesk\Inventor 2023\Bin\Inventor.exe
+:: ════════════════════════════════════════════════════════════════
+:: deploy.bat — Build + Verify DLL
+:: Mục đích : Chỉ build và kiểm tra output. KHÔNG đụng Inventor.
+:: Gọi bởi  : Claude Code (tự động) hoặc double-click (thủ công)
+:: Exit code : 0 = thành công  |  1 = thất bại
+:: ════════════════════════════════════════════════════════════════
+
+:: ── CẤU HÌNH ────────────────────────────────────────────────────
+set ASSEMBLY=SymbolReplacer
+set DOTNET_EXE=C:\Program Files\dotnet\dotnet.exe
 set ADDIN_DIR=%APPDATA%\Autodesk\Inventor 2023\Addins
 set PROJECT_DIR=%~dp0
-set ASSEMBLY=SymbolReplacer
+:: ────────────────────────────────────────────────────────────────
 
 echo.
-echo ════════════════════════════════════════════
-echo   Symbol Replacer - Deploy and Reload
-echo ════════════════════════════════════════════
+echo ════════════════════════════════════════════════════════════════
+echo   DEPLOY ^| %ASSEMBLY%
+echo ════════════════════════════════════════════════════════════════
 
-:: ── BƯỚC 1: Build ────────────────────────────
+:: ── GUARD: Không build khi Inventor đang mở ─────────────────────
 echo.
-echo [1/3] Dang build project...
-cd /d "%PROJECT_DIR%"
-"C:\Program Files\dotnet\dotnet.exe" build -c Debug
-
-if %ERRORLEVEL% neq 0 (
+echo [CHECK] Kiem tra Inventor...
+tasklist /FI "IMAGENAME eq Inventor.exe" 2>nul | find /I "Inventor.exe" >nul
+if %ERRORLEVEL% equ 0 (
     echo.
-    echo [LOI] Build that bai. Dung lai.
-    echo       Kiem tra loi ben tren va fix truoc khi deploy lai.
-    pause
+    echo [LOI] Inventor dang chay!
+    echo       Khong the build khi Inventor giu lock DLL.
+    echo       Dung restart.bat de dong Inventor truoc.
+    echo.
+    exit /b 1
+)
+echo [OK] Inventor chua mo - an toan de build.
+
+:: ── BƯỚC 1: Build ───────────────────────────────────────────────
+echo.
+echo [1/3] Build project...
+cd /d "%PROJECT_DIR%"
+
+if not exist "%DOTNET_EXE%" (
+    echo [LOI] Khong tim thay dotnet.exe tai: %DOTNET_EXE%
+    echo       Cap nhat bien DOTNET_EXE trong deploy.bat
+    exit /b 1
+)
+
+"%DOTNET_EXE%" build -c Debug --nologo 2>&1
+set BUILD_RESULT=%ERRORLEVEL%
+
+if %BUILD_RESULT% neq 0 (
+    echo.
+    echo [LOI] Build that bai ^(exit code: %BUILD_RESULT%^).
+    echo       Doc loi o tren, fix roi chay lai deploy.bat.
+    echo.
     exit /b 1
 )
 echo [OK] Build thanh cong.
 
-:: ── BƯỚC 2: Kiểm tra DLL đã được copy chưa ──
+:: ── BƯỚC 2: Kiểm tra DLL đã copy sang Addins chưa ───────────────
 echo.
-echo [2/3] Kiem tra deploy...
+echo [2/3] Kiem tra DLL trong Addins folder...
+
+if not exist "%ADDIN_DIR%\" (
+    echo [LOI] Addins folder khong ton tai: %ADDIN_DIR%
+    echo       Kiem tra Inventor da cai chua, hoac kiem tra bien ADDIN_DIR.
+    exit /b 1
+)
+
 if not exist "%ADDIN_DIR%\%ASSEMBLY%.dll" (
-    echo [LOI] Khong tim thay DLL tai: %ADDIN_DIR%
-    echo       Post-build event co the bi loi.
-    echo       Copy thu cong:
-    echo       copy "bin\Debug\net48\%ASSEMBLY%.dll" "%ADDIN_DIR%\"
-    echo       copy "%ASSEMBLY%.addin" "%ADDIN_DIR%\"
-    pause
+    echo [LOI] DLL chua duoc copy:
+    echo       Mong doi: %ADDIN_DIR%\%ASSEMBLY%.dll
+    echo       Post-build event trong .csproj co the bi loi.
+    echo.
+    echo       Fix thu cong:
+    echo         copy "%PROJECT_DIR%bin\Debug\net48\%ASSEMBLY%.dll" "%ADDIN_DIR%\"
+    echo         copy "%PROJECT_DIR%%ASSEMBLY%.addin"                "%ADDIN_DIR%\"
     exit /b 1
 )
-echo [OK] DLL da duoc copy: %ADDIN_DIR%\%ASSEMBLY%.dll
-echo [OK] .addin da duoc copy: %ADDIN_DIR%\%ASSEMBLY%.addin
+echo [OK] DLL : %ADDIN_DIR%\%ASSEMBLY%.dll
 
-:: ── BƯỚC 3: Tắt Inventor ─────────────────────
-echo.
-echo [3/3] Tat Inventor...
-tasklist /FI "IMAGENAME eq Inventor.exe" 2>nul | find /I "Inventor.exe" >nul
-if %ERRORLEVEL% equ 0 (
-    echo       Inventor dang chay, dang tat...
-    taskkill /F /IM Inventor.exe >nul 2>&1
-    timeout /t 3 /nobreak >nul
-    echo [OK] Inventor da tat.
+if not exist "%ADDIN_DIR%\%ASSEMBLY%.addin" (
+    echo [WARN] File .addin chua co trong Addins folder.
+    echo        Copy thu cong: copy "%PROJECT_DIR%%ASSEMBLY%.addin" "%ADDIN_DIR%\"
 ) else (
-    echo [OK] Inventor chua mo - bo qua buoc nay.
+    echo [OK] .addin: %ADDIN_DIR%\%ASSEMBLY%.addin
 )
 
-:: ── Mở Inventor ──────────────────────────────
+:: ── BƯỚC 3: In thông tin DLL để verify ──────────────────────────
 echo.
-echo Mo Inventor...
-if not exist "%INVENTOR_EXE%" (
-    echo [LOI] Khong tim thay: %INVENTOR_EXE%
-    echo       Cap nhat bien INVENTOR_EXE trong deploy.bat
-    pause
-    exit /b 1
+echo [3/3] Thong tin DLL...
+for %%F in ("%ADDIN_DIR%\%ASSEMBLY%.dll") do (
+    echo       Kich thuoc : %%~zF bytes
+    echo       Thoi gian  : %%~tF
 )
 
-start "" "%INVENTOR_EXE%"
-
+:: ── DONE ────────────────────────────────────────────────────────
 echo.
-echo ════════════════════════════════════════════
-echo   Deploy HOAN THANH
-echo ════════════════════════════════════════════
+echo ════════════════════════════════════════════════════════════════
+echo   BUILD HOAN THANH - San sang de restart Inventor
+echo   Buoc tiep theo: chay restart.bat
+echo ════════════════════════════════════════════════════════════════
 echo.
-echo Sau khi Inventor mo xong, kiem tra:
-echo   1. Tools - Add-In Manager - "Symbol Replacer" co hien?
-echo   2. Mo file .idw - Tab "Custom Tools" co tren ribbon?
-echo   3. Click button - Palette co mo ra?
-echo   4. Xem log trong DebugView
-echo.
+exit /b 0

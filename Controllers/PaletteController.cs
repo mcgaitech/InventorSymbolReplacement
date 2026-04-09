@@ -73,6 +73,7 @@ namespace SymbolReplacer.Controllers
                 _panel.ScanSheetRequested         += OnScanSheetRequested;
                 _panel.ClearHighlightRequested    += OnClearHighlightRequested;
                 _panel.LocalSourceRequested       += OnLocalSourceRequested;
+                _panel.ViewModeChanged            += OnViewModeChanged;
                 _panel.SymbolGrid.SelectionChanged += OnSymbolSelectionChanged;
                 Debug.WriteLine($"{LOG_PREFIX} Đã attach panel.");
             }
@@ -102,15 +103,26 @@ namespace SymbolReplacer.Controllers
         public void Cleanup()
         {
             Debug.WriteLine($"{LOG_PREFIX} Cleanup...");
-            ClearHighlight();
-            DetachPanel();
-            _thumbnailService.ClearCache();
 
-            foreach (var sym in _allSymbols)
-                sym.Dispose();
-            _allSymbols.Clear();
+            // ClearHighlight có thể fail nếu Inventor đang shutdown (COM objects invalid)
+            try { ClearHighlight(); }
+            catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI ClearHighlight: {ex.Message}"); }
 
-            _libraryService.CloseLibrary();
+            try { DetachPanel(); }
+            catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI DetachPanel: {ex.Message}"); }
+
+            try { _thumbnailService.ClearCache(); }
+            catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI ClearCache: {ex.Message}"); }
+
+            try
+            {
+                foreach (var sym in _allSymbols) sym.Dispose();
+                _allSymbols.Clear();
+            }
+            catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI dispose symbols: {ex.Message}"); }
+
+            try { _libraryService.CloseLibrary(); }
+            catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI CloseLibrary: {ex.Message}"); }
         }
 
         // ─── Private: Library loading ─────────────────────────────────────────
@@ -374,6 +386,13 @@ namespace SymbolReplacer.Controllers
             LoadLibrary(newPath);
         }
 
+        private void OnViewModeChanged(object sender, EventArgs e)
+        {
+            // View mode thay đổi (Grid↔List) → re-apply items vì SetItems tạo ThumbnailItemVm mới
+            Debug.WriteLine($"{LOG_PREFIX} ViewModeChanged → re-apply items.");
+            ApplyFilter();
+        }
+
         private void OnSearchQueryChanged(object sender, string query)
         {
             _searchQuery = query ?? string.Empty;
@@ -411,6 +430,7 @@ namespace SymbolReplacer.Controllers
             _panel.ScanSheetRequested         -= OnScanSheetRequested;
             _panel.ClearHighlightRequested    -= OnClearHighlightRequested;
             _panel.LocalSourceRequested       -= OnLocalSourceRequested;
+            _panel.ViewModeChanged            -= OnViewModeChanged;
 
             if (_panel.SymbolGrid != null)
                 _panel.SymbolGrid.SelectionChanged -= OnSymbolSelectionChanged;

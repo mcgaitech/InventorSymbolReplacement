@@ -137,6 +137,15 @@ namespace SymbolReplacer
         {
             Debug.WriteLine($"{LOG_PREFIX} ===== Bắt đầu tắt addin =====");
 
+            // QUAN TRỌNG: unhook keyboard NGAY ĐẦU TIÊN — trước mọi cleanup khác.
+            // WH_GETMESSAGE hook callback fire sau khi managed objects bị GC → crash Inventor.
+            try
+            {
+                Views.SymbolReplacerPanel.CleanupKeyboardHook();
+                Debug.WriteLine($"{LOG_PREFIX} Keyboard hook cleaned up.");
+            }
+            catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI cleanup keyboard hook: {ex.Message}"); }
+
             // Mỗi bước cleanup độc lập — lỗi 1 bước không chặn bước khác
             try { _replaceController?.Cleanup(); }
             catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI ReplaceController.Cleanup: {ex.Message}"); }

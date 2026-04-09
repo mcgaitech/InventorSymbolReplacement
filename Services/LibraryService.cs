@@ -136,12 +136,25 @@ namespace SymbolReplacer.Services
             {
                 try
                 {
-                    doc.Close(true);
-                    Debug.WriteLine($"{LOG_PREFIX} Đã đóng: {doc.FullFileName}");
+                    // Kiểm tra document còn valid trước khi đóng.
+                    // Khi Inventor đang shutdown, COM objects có thể đã bị release
+                    // → doc.Close() sẽ crash với access violation.
+                    string fileName = null;
+                    try { fileName = doc.FullFileName; } catch { }
+
+                    if (fileName != null)
+                    {
+                        doc.Close(true);
+                        Debug.WriteLine($"{LOG_PREFIX} Đã đóng: {fileName}");
+                    }
+                    else
+                    {
+                        Debug.WriteLine($"{LOG_PREFIX} Document đã bị release bởi Inventor — bỏ qua.");
+                    }
                 }
                 catch (Exception ex)
                 {
-                    Debug.WriteLine($"{LOG_PREFIX} LỖI đóng doc: {ex.Message}");
+                    Debug.WriteLine($"{LOG_PREFIX} LỖI đóng doc (có thể Inventor đang shutdown): {ex.Message}");
                 }
             }
 

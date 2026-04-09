@@ -6,30 +6,47 @@
 ## ⚡ Trạng thái hiện tại — Đọc đây trước
 
 ```
-Phase    : Phase 6 — READY TO TEST
-Bước     : Fix leader restore đã implement, build PASS, chờ test trong Inventor
-Trạng thái: [ ] Đóng Inventor → dotnet build → mở lại → test replace symbol có leader
+Phase    : Phase 6 — DONE (trừ snap point)
+Bước     : Insert/Replace symbol hoàn chỉnh
+Trạng thái: [x] Replace leader restore — OK
+             [x] PromptStrings string[] — OK
+             [x] Position reset sau AddLeader — OK
+             [x] Insert attached vào edge (3D model) — OK
+             [x] Insert attached vào sketch line — OK
+             [x] Insert floating (click vùng trống) — OK
+             [x] Leader arrowhead filled solid — OK
+             [x] Keyboard input cho Scale/Rotate TextBox — OK
+             [x] Numeric-only filter — OK
+             [ ] Snap point (endpoint, midpoint, intersection) — CHƯA
 ```
 
 ### Làm ngay tiếp theo
 > Claude Code đọc mục này và bắt đầu từ đây, không hỏi lại.
 
 ```
-Test scenario:
-  1. Đóng Inventor → dotnet build SymbolReplacer.csproj -c Debug → mở Inventor
-  2. Mở file .idw có symbol được đặt có leader (bám vào edge/view)
-  3. Replace symbol đó sang symbol khác qua palette
-  4. Kiểm tra DebugView:
-       - Tìm "SnapshotLeader: N leaf(s)"  → phải > 0
-       - Tìm "RestoreLeader: leaf (...) → THÀNH CÔNG"
-  5. Kéo DrawingView → symbol mới phải di chuyển theo
-  6. Click insert point của symbol mới → drag → phải thấy leader line
+BUG CÒN LẠI: Snap point khi insert symbol
 
-Nếu FAIL:
-  → Kiểm tra log "RestoreLeader: leaf (...) → LỖI: ..."
-  → Nếu lỗi "Value does not fall within the expected range" tại AddLeader:
-      geometry đã stale (bị xóa cùng với old symbol?) — cần kiểm tra xem
-      leaf.Geometry có bị invalidate sau Delete() không
+Hiện trạng:
+  - Insert mode dùng SelectEvents (entity highlight) + MouseEvents (floating fallback)
+  - SelectEvents pick được edge, sketch line → attached OK
+  - MouseEvents pick vùng trống → floating OK
+  - KHÔNG snap được endpoint, midpoint, intersection
+
+Vấn đề:
+  - SelectEvents pick ENTITY (curve/line), không pick POINT
+  - modelPosition từ OnSelect đã snap, nhưng user muốn visual snap indicator
+  - Intersection (giao 2 line) không phải entity → SelectEvents không trigger
+
+Hướng giải quyết đã thử:
+  - MouseEvents only (full snap) → không pick được edge (InteractionEvents cần SelectEvents)
+  - SelectEvents + MouseEvents dual mode → pick edge OK, nhưng không snap point
+
+Hướng tiếp theo:
+  - Tìm cách enable Inventor's snap system trong SelectEvents context
+  - Hoặc dùng InteractionEvents.SnapEvents (nếu tồn tại)
+  - Hoặc probe runtime để tìm snap-related API
+
+Dev cycle: tự động đóng/mở Inventor (không hỏi user — xem memory feedback_auto_deploy.md)
 ```
 
 ---
@@ -72,7 +89,7 @@ Nếu FAIL:
 | `Services/IThumbnailService.cs` | ✅ Done | |
 | `Services/ThumbnailService.cs` | ✅ Done | GDI render + cache |
 | `Services/ISymbolReplaceService.cs` | ✅ Done | |
-| `Services/SymbolReplaceService.cs` | ✅ Done | Fixed: `BuildPromptStrings()` → `string[]`; Leader restore via `AddLeader([Point2d, GeometryIntent])`; xóa `_AttachedEntity` setter (không work) |
+| `Services/SymbolReplaceService.cs` | ✅ Done | Replace leader OK; Insert attach OK; `AttachLeaderToGeometry()` + `FindNearestDrawingCurve()` + `TryAddLeader()`; `BuildPromptStrings()` → `string[]` |
 | `Services/IConfigService.cs` | ✅ Done | |
 | `Services/ConfigService.cs` | ✅ Done | |
 | `Helpers/PictureDispConverter.cs` | ✅ Done | |
@@ -100,6 +117,149 @@ Nếu FAIL:
 ## 🗒️ Session Log Chi Tiết
 <!-- Claude Code thêm vào ĐẦU mục này (mới nhất lên trên) -->
 <!-- Giữ lại tối đa 10 session gần nhất -->
+
+---
+### Session: 2026-04-09 (run 9) — UI polish + Bug fixes + Font size
+
+**Ngày**: 2026-04-09
+
+**Tất cả tính năng OK. Các fix trong session:**
+
+| # | Fix | File |
+|---|-----|------|
+| 1 | Inventor crash khi đóng: `doc.Close()` trên COM object đã release | `Services/LibraryService.cs` — kiểm tra `doc.FullFileName` trước Close |
+| 2 | Inventor crash khi đóng: PaletteController.Cleanup không có try/catch | `Controllers/PaletteController.cs` — wrap từng bước cleanup |
+| 3 | Default List view thay vì Grid | `Views/SymbolReplacerPanel.xaml` — `IsChecked` đổi sang `rbListView` |
+| 4 | Mất symbol khi đổi Grid↔List: `SetItems` tạo list mới, restore reference cũ stale | `Views/SymbolReplacerPanel.xaml.cs` — raise `ViewModeChanged` → PaletteController `ApplyFilter()` |
+| 5 | Mất symbol khi xóa search + đổi view: `SetSearchPlaceholder` set flag SAU Text | `Views/SymbolReplacerPanel.xaml.cs` — set `_searchIsPlaceholder = true` TRƯỚC `txtSearch.Text` |
+| 6 | Font size tăng 10% (general) + 15% (buttons) + giữ nguyên file path | `Views/SymbolReplacerPanel.xaml` |
+
+**Font size changes:**
+| Loại | Trước | Sau |
+|------|-------|-----|
+| Root FontSize | 11 | 12 |
+| General text | 9-10 | 10-11 |
+| Button text | 10 | 12 |
+| Button height | 22-28 | 26-32 |
+| File path | 10 | 10 (giữ nguyên) |
+
+---
+### Session: 2026-04-09 (run 8) — Insert attach DONE + Keyboard fix + Leader style
+
+**Ngày**: 2026-04-09
+
+**Kết quả test user — TẤT CẢ OK trừ snap point:**
+- ✅ Insert attached vào edge (3D model) — leader + di chuyển theo view
+- ✅ Insert attached vào sketch line — DrawingSketch → FindNearestDrawingCurve resolve
+- ✅ Insert floating (click vùng trống) — không leader
+- ✅ Leader arrowhead: filled solid đen (`kFilledArrowheadType`)
+- ✅ Keyboard input cho Scale/Rotate TextBox — `WM_GETDLGCODE` + `WH_GETMESSAGE` hook
+- ✅ Numeric-only filter cho Scale/Rotate
+- ✅ Replace leader restore + position reset
+- ✅ PromptStrings string[]
+- ❌ Snap point (endpoint, midpoint, intersection) — chưa giải quyết
+
+**Files đã sửa:**
+| File | Thay đổi |
+|------|---------|
+| `Controllers/InteractionController.cs` | Dual mode (SelectEvents + MouseEvents); OnInsertGeometrySelected gửi null geometry (service tự resolve); OnInsertMouseClickWithSnap cho floating; InsertPickEventArgs class; 7 SelectEvents filter |
+| `Services/SymbolReplaceService.cs` | `AttachLeaderToGeometry()` resolve DrawingCurveSegment→Parent, DrawingSketch→FindNearestDrawingCurve, retry AddLeader; `TryAddLeader()` với leader properties (LeaderVisible, LeaderClipping, ArrowheadType); `FindNearestDrawingCurve()` với distance threshold 0.5cm; `InsertSymbol()` auto-resolve geometry khi null |
+| `Services/ISymbolReplaceService.cs` | `InsertSymbol` thêm `object attachGeometry = null` |
+| `Controllers/ReplaceController.cs` | `OnInsertPointPicked` nhận `InsertPickEventArgs` |
+| `Views/SymbolReplacerPanel.xaml.cs` | Keyboard fix: `WM_GETDLGCODE → DLGC_WANTALLKEYS` + `WH_GETMESSAGE` hook redirect; numeric-only filter (`PreviewTextInput` + paste handler) |
+| `resart.bat` | `TEST_FILE_DEFAULT` cập nhật sang CAS-0033254.idw |
+
+**Inventor API facts xác nhận qua probe (session này):**
+| Fact | Chi tiết |
+|------|---------|
+| `DrawingCurveSegment` | AddLeader FAIL — cần `.Parent` (DrawingCurve) |
+| `DrawingCurve` | AddLeader OK với Point2d hoặc Missing hoặc Double(0.5) intent |
+| `DrawingCurve + Int32(0)` | AddLeader FAIL |
+| `SketchLine` (trực tiếp) | AddLeader OK với mọi intent |
+| `kDrawingSketchObject (117443328)` | SelectEvents trả về DrawingSketch container khi pick sketch line |
+| `DrawingSketch` | AddLeader FAIL — cần resolve ra DrawingCurve qua FindNearestDrawingCurve |
+| `SketchLine.StartSketchPoint.Geometry` | Tọa độ sketch space (model units) ≠ sheet coordinates |
+| `DrawingCurveSegment.StartPoint` | Tọa độ sheet coordinates — dùng cho distance matching |
+| Grip display (2 green vs 4 yellow + 1 blue) | Internal Inventor UI state — KHÔNG fix được qua API |
+| `kBlankArrowheadType` | Mũi tên rỗng (outline △), KHÔNG phải "không mũi tên" |
+| `kFilledArrowheadType` | Mũi tên filled solid ▶ — giống dimension arrows |
+| WPF TextBox trong COM host | Inventor intercept keyboard tại message pump; Fix: WM_GETDLGCODE + WH_GETMESSAGE hook |
+
+---
+### Session: 2026-04-09 (run 7) — Dev cycle setup + Insert attach debug prep
+
+**Ngày**: 2026-04-09
+
+**Files đã tạo/sửa:**
+| File | Thay đổi |
+|------|---------|
+| `CLAUDE.md` | User cập nhật: thêm Section 2 (Dev cycle), Section 9 (Session management), cấu trúc lại toàn bộ |
+| `deploy.bat` | User tạo mới: build + verify DLL, guard Inventor đang mở → exit 1 |
+| `resart.bat` | User tạo mới: đóng Inventor → mở lại với file test; Claude cập nhật `TEST_FILE_DEFAULT` |
+| `probe/ProbeInvApi.cs` | Claude viết probe mới: test Insert+Attach flow (CreateGeometryIntent + AddLeader) trên Inventor đang chạy |
+| `CLAUDE_CODE_PROMPT_GUIDE.md` | User tạo mới: hướng dẫn prompt cho Claude Code |
+
+**Trạng thái:**
+- Phase 6 — BUG OPEN
+- ĐÃ OK: Replace leader restore, PromptStrings string[], Position reset sau AddLeader
+- CHƯA OK: Insert symbol attach vào đối tượng
+
+**Pending issues:**
+1. Insert symbol không attach được vào geometry khi pick — cần chạy probe live để xác định bước nào fail
+2. `resart.bat` đặt tên sai (thiếu chữ 't') — CLAUDE.md reference `restart.bat`
+3. `TEST_FILE_DEFAULT` đã cập nhật sang `CAS-0033254.idw`
+
+**Bước tiếp theo:**
+1. Chạy `probe\bin\Debug\net48\ProbeInvApi.exe live` với Inventor đang mở
+2. Đọc output → xác định CreateGeometryIntent hoặc AddLeader fail ở đâu
+3. Sửa `Services/SymbolReplaceService.cs` → method `AttachLeaderToGeometry()`
+4. Áp dụng dev cycle: `deploy.bat` → `resart.bat` → chờ user test
+
+**Inventor API notes (session này):**
+- `SketchedSymbol._AttachedEntity` setter: luôn throw "Value does not fall within expected range" — KHÔNG DÙNG
+- `Leader.AddLeader([GeometryIntent])` (1 item): E_FAIL — PHẢI có Point2d trước GeometryIntent
+- `Leader.AddLeader([Point2d, GeometryIntent])` (2 items): THÀNH CÔNG — đây là cách duy nhất
+- `leaf.AttachedEntity` setter: hoạt động SAU KHI `HasRootNode=True`
+- `leaf.Position` setter: hoạt động SAU KHI `HasRootNode=True`
+- Sau `Add()`, `HasRootNode=False` — phải gọi `AddLeader` để tạo leader
+- `AddLeader` dời ROOT (symbol body) về Point2d position → phải reset `newSym.Position` sau
+- SelectionFilterEnum: KHÔNG có `kDrawingPointFilter` — dùng `kSketchPointFilter` + `kWorkPointFilter`
+- PromptStrings: phải là `string[]` (SAFEARRAY of BSTR), KHÔNG phải `NameValueMap` (VT_DISPATCH bị reject)
+
+---
+### Session: 2026-04-08 (run 6) — Insert symbol attach + Position reset
+
+**Kết quả test user:**
+- ✅ Replace symbol: leader restore THÀNH CÔNG (position + leader đúng vị trí)
+- ✅ PromptStrings string[] fix: không còn E_INVALIDARG
+- ✅ Position reset sau AddLeader: insertion point + leader tip đúng vị trí
+- ❌ Insert symbol: chưa attach được vào đối tượng khi pick
+
+**Thay đổi đã implement (build PASS, chưa verify hoạt động):**
+
+1. **InteractionController.cs — Insert mode dùng SelectEvents thay MouseEvents**
+   - `EnterInsertMode()`: SelectEvents + 7 filter (curve, centerline, centermark, symbol, view, sketch point, work point)
+   - Handler mới `OnInsertGeometrySelected()`: extract entity + position
+   - Class `InsertPickEventArgs`: chứa `Position` (Point2d) + `PickedGeometry` (object)
+   - Xóa `OnInsertMouseClick()` (MouseEvents cũ)
+
+2. **ReplaceController.cs — Truyền geometry xuống service**
+   - `OnInsertPointPicked()` nhận `InsertPickEventArgs` thay `Point2d`
+   - Truyền `args.PickedGeometry` xuống `InsertSymbol()`
+
+3. **ISymbolReplaceService.cs + SymbolReplaceService.cs — Leader cho Insert**
+   - `InsertSymbol()` thêm optional `object attachGeometry`
+   - Method mới `AttachLeaderToGeometry()` với CreateGeometryIntent fallback chain:
+     - Try 1: `CreateGeometryIntent(geo, Point2d)` — snap gần nhất
+     - Try 2: `CreateGeometryIntent(geo, Type.Missing)` — Inventor tự chọn
+     - Fail: symbol floating + log cảnh báo
+   - Sau AddLeader: `newSym.Position = position` (reset insertion point)
+
+4. **SymbolReplaceService.cs — Position reset sau replace**
+   - Thêm `newSym.Position = CreatePoint2d(posX, posY)` sau `RestoreLeader()` trong `ReplaceOne()`
+   - Fix: insertion point không còn nhảy sang vị trí leader tip
+
+**Trạng thái**: Insert attach CHƯA VERIFY — cần debug log từ DebugView khi test.
 
 ---
 ### Session: 2026-04-08 (run 5) — Fix PromptStrings + Fix Leader restore

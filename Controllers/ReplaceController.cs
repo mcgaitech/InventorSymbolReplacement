@@ -231,9 +231,9 @@ namespace SymbolReplacer.Controllers
             _interactionCtrl.EnterInsertMode();
         }
 
-        private void OnInsertPointPicked(object sender, Point2d position)
+        private void OnInsertPointPicked(object sender, InsertPickEventArgs args)
         {
-            Debug.WriteLine($"{LOG_PREFIX} Insert point picked: ({position.X:F3}, {position.Y:F3})");
+            Debug.WriteLine($"{LOG_PREFIX} Insert point picked: ({args.Position.X:F3}, {args.Position.Y:F3}) hasGeometry={args.PickedGeometry != null}");
 
             var newDef = _paletteCtrl.SelectedSymbol?.Definition;
             if (newDef == null)
@@ -252,14 +252,15 @@ namespace SymbolReplacer.Controllers
                 return;
             }
 
-            // Đọc scale và rotation từ Properties panel (người dùng đặt trước khi Insert)
+            // Đọc scale và rotation từ Properties panel
             double scale    = _panel?.InsertScale       ?? 1.0;
             double rotation = _panel?.InsertRotationRad ?? 0.0;
 
             Debug.WriteLine($"{LOG_PREFIX} Insert scale={scale:F3} rotation={rotation:F3}rad");
 
             var resolvedDef = ResolveDefinitionInDocument(doc, newDef);
-            bool ok = _replaceService.InsertSymbol(sheet, resolvedDef, position, rotation, scale);
+            bool ok = _replaceService.InsertSymbol(sheet, resolvedDef, args.Position,
+                                                   rotation, scale, args.PickedGeometry);
 
             if (ok)
                 _panel?.SetStatusSuccess(1);

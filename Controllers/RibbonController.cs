@@ -190,6 +190,11 @@ namespace SymbolReplacer.Controllers
             }
             catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI release sizer: {ex.Message}"); }
 
+            // Unhook keyboard hook TRƯỚC KHI dispose HwndSource/panel
+            // (nếu hook callback fire sau GC → crash Inventor khi đóng)
+            try { Views.SymbolReplacerPanel.CleanupKeyboardHook(); }
+            catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI cleanup keyboard hook: {ex.Message}"); }
+
             try
             {
                 if (_hwndSource != null)

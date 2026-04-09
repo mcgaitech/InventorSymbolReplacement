@@ -1,9 +1,11 @@
 using System;
 using System.Diagnostics;
+using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Media;
 using SymbolReplacer.Models;
 
@@ -90,15 +92,81 @@ namespace SymbolReplacer.Views
 
         // ─── Constructor ──────────────────────────────────────────────────────
 
+        private static IntPtr _hwndSourceHandle = IntPtr.Zero;
+
         public SymbolReplacerPanel()
         {
             InitializeComponent();
             _symbolGrid = new WpfSymbolGrid(listSymbols);
             SetSearchPlaceholder();
-            // Right-click: chọn item + gán ContextMenu — wired ở đây thay vì XAML Style setter
-            // để tránh lỗi BAML connectionId trong COM host (Inventor addin)
             listSymbols.PreviewMouseRightButtonDown += ListSymbols_PreviewMouseRightButtonDown;
+
+            // Keyboard fix cho WPF TextBox trong COM host (Inventor):
+            // WM_GETDLGCODE → DLGC_WANTALLKEYS: báo Inventor rằng HwndSource muốn nhận keyboard.
+            // KHÔNG dùng WH_GETMESSAGE hook (gây crash Inventor khi đóng).
+            Loaded += (s, e) =>
+            {
+                var source = PresentationSource.FromVisual(this) as HwndSource;
+                if (source != null)
+                {
+                    _hwndSourceHandle = source.Handle;
+                    source.AddHook(WndProcHook);
+                    Debug.WriteLine($"{LOG_PREFIX} Keyboard fix installed (WM_GETDLGCODE).");
+                }
+            };
+
+            // Chỉ cho nhập số vào Scale và Rotate
+            WireNumericFilter(txtScale);
+            WireNumericFilter(txtRotate);
+
             Debug.WriteLine($"{LOG_PREFIX} WPF SymbolReplacerPanel khởi tạo THÀNH CÔNG.");
+        }
+
+        private const int WM_GETDLGCODE = 0x0087;
+        private const int DLGC_WANTALLKEYS = 0x0004;
+        private const int DLGC_WANTCHARS = 0x0080;
+        private const int DLGC_WANTTAB = 0x0002;
+        private const int DLGC_WANTARROWS = 0x0001;
+
+        /// <summary>
+        /// HwndSource WndProc hook: trả DLGC_WANTALLKEYS cho WM_GETDLGCODE
+        /// → ngăn Inventor's TranslateAccelerator nuốt keyboard messages.
+        /// </summary>
+        private static IntPtr WndProcHook(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+        {
+            if (msg == WM_GETDLGCODE && Keyboard.FocusedElement is TextBox)
+            {
+                handled = true;
+                return (IntPtr)(DLGC_WANTALLKEYS | DLGC_WANTCHARS | DLGC_WANTTAB | DLGC_WANTARROWS);
+            }
+            return IntPtr.Zero;
+        }
+
+        /// <summary>
+        /// Gọi từ Deactivate() khi Inventor đóng. Clear static references.
+        /// </summary>
+        public static void CleanupKeyboardHook()
+        {
+            _hwndSourceHandle = IntPtr.Zero;
+        }
+
+        /// <summary>Chỉ cho nhập số: digits, dấu chấm, dấu trừ.</summary>
+        private static void WireNumericFilter(TextBox tb)
+        {
+            if (tb == null) return;
+            tb.PreviewTextInput += (s, e) =>
+            {
+                e.Handled = !Regex.IsMatch(e.Text, @"^[\d.\-]$");
+            };
+            DataObject.AddPastingHandler(tb, (s, e) =>
+            {
+                if (e.DataObject.GetDataPresent(typeof(string)))
+                {
+                    string text = (string)e.DataObject.GetData(typeof(string));
+                    if (!Regex.IsMatch(text, @"^[\d.\-]+$")) e.CancelCommand();
+                }
+                else e.CancelCommand();
+            });
         }
 
         // ─── Public methods ───────────────────────────────────────────────────
@@ -273,9 +341,12 @@ namespace SymbolReplacer.Views
 
         private void SetSearchPlaceholder()
         {
+            // QUAN TRỌNG: set flag TRƯỚC khi đổi Text
+            // Nếu đổi Text trước → TextChanged fires → _searchIsPlaceholder vẫn false
+            // → SearchQueryChanged("Search...") → filter sai → list trống
+            _searchIsPlaceholder = true;
             txtSearch.Text       = "Search...";
             txtSearch.Foreground = new SolidColorBrush(Color.FromRgb(153, 153, 153));
-            _searchIsPlaceholder = true;
         }
 
         private void TxtSearch_GotFocus(object sender, RoutedEventArgs e)
@@ -302,6 +373,9 @@ namespace SymbolReplacer.Views
 
         // ─── View mode toggle (Grid / List) ───────────────────────────────────
 
+        /// <summary>Raised khi view mode thay đổi → PaletteController cần re-apply items.</summary>
+        public event EventHandler ViewModeChanged;
+
         private void ViewMode_Changed(object sender, RoutedEventArgs e)
         {
             // Có thể được gọi trước InitializeComponent hoàn tất
@@ -309,8 +383,7 @@ namespace SymbolReplacer.Views
 
             bool isGrid = rbGridView?.IsChecked == true;
 
-            // Lưu ItemsSource trước khi thay đổi panel — WPF có thể clear source khi rebuild container
-            var savedSource = listSymbols.ItemsSource;
+            // Clear ItemsSource trước khi thay đổi template
             listSymbols.ItemsSource = null;
 
             if (isGrid)
@@ -332,10 +405,10 @@ namespace SymbolReplacer.Views
                                      ScrollBarVisibility.Disabled);
             }
 
-            // Khôi phục ItemsSource sau khi panel mới được áp dụng
-            listSymbols.ItemsSource = savedSource;
-
             Debug.WriteLine($"{LOG_PREFIX} View mode: {(isGrid ? "Grid" : "List")}");
+
+            // Yêu cầu PaletteController re-apply items (tạo lại ThumbnailItemVm list)
+            ViewModeChanged?.Invoke(this, EventArgs.Empty);
         }
 
         // ─── ListBox: right-click selects item first ──────────────────────────

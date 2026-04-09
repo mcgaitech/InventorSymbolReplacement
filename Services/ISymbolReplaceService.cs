@@ -30,9 +30,10 @@ namespace SymbolReplacer.Services
         /// <summary>
         /// Insert một instance mới của definition vào sheet tại vị trí chỉ định.
         /// rotation tính bằng radian, scale là hệ số tỷ lệ.
+        /// Nếu attachGeometry != null → tạo leader bám vào geometry đó.
         /// Tạo 1 Transaction → 1 Undo step.
         /// </summary>
         bool InsertSymbol(Sheet sheet, SketchedSymbolDefinition definition, Point2d position,
-                          double rotation = 0.0, double scale = 1.0);
+                          double rotation = 0.0, double scale = 1.0, object attachGeometry = null);
     }
 }

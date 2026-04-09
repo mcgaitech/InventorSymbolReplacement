@@ -3,7 +3,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              Background="#FFF0F0F0"
              FontFamily="Segoe UI"
-             FontSize="11"
+             FontSize="12"
              Foreground="#FF3C3C3C"
              MinWidth="220">
 
@@ -21,7 +21,7 @@
                            VerticalAlignment="Center"/>
                 </Border>
                 <TextBlock Text="{Binding Name}"
-                           FontSize="9"
+                           FontSize="11"
                            TextWrapping="Wrap"
                            TextAlignment="Center"
                            MaxHeight="30"
@@ -46,7 +46,7 @@
                            HorizontalAlignment="Center" VerticalAlignment="Center"/>
                 </Border>
                 <TextBlock Text="{Binding Name}"
-                           FontSize="10"
+                           FontSize="11"
                            VerticalAlignment="Center"
                            TextWrapping="NoWrap"
                            TextTrimming="CharacterEllipsis"
@@ -121,7 +121,7 @@
                 <!-- Tab bar: File | Local -->
                 <DockPanel Margin="0,0,0,4">
                     <TextBlock Text="SOURCE:"
-                               FontSize="9"
+                               FontSize="11"
                                FontWeight="Bold"
                                Foreground="#FF646464"
                                VerticalAlignment="Center"
@@ -131,14 +131,14 @@
                                      Content="File"
                                      GroupName="SourceMode"
                                      IsChecked="True"
-                                     FontSize="10"
+                                     FontSize="11"
                                      Margin="0,0,4,0"
                                      Cursor="Hand"
                                      Checked="SourceMode_Changed"/>
                         <RadioButton x:Name="rbSourceLocal"
                                      Content="Local"
                                      GroupName="SourceMode"
-                                     FontSize="10"
+                                     FontSize="11"
                                      Cursor="Hand"
                                      Checked="SourceMode_Changed"
                                      ToolTip="Symbols defined in the active drawing document"/>
@@ -196,7 +196,6 @@
                 <!-- View toggle on right -->
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="4,0,0,0">
                     <RadioButton x:Name="rbGridView"
-                                 IsChecked="True"
                                  GroupName="ViewMode"
                                  ToolTip="Grid view"
                                  Style="{StaticResource ViewToggleStyle}"
@@ -206,6 +205,7 @@
                         <TextBlock Text="⊞" FontSize="13" Foreground="White"/>
                     </RadioButton>
                     <RadioButton x:Name="rbListView"
+                                 IsChecked="True"
                                  GroupName="ViewMode"
                                  ToolTip="List view"
                                  Style="{StaticResource ViewToggleStyle}"
@@ -229,7 +229,7 @@
                          Foreground="#FF999999"
                          Padding="3,2"
                          VerticalContentAlignment="Center"
-                         FontSize="10"
+                         FontSize="11"
                          TextChanged="TxtSearch_TextChanged"
                          GotFocus="TxtSearch_GotFocus"
                          LostFocus="TxtSearch_LostFocus"
@@ -244,12 +244,12 @@
                  Grid.Row="2"
                  Background="White"
                  BorderThickness="0"
-                 HorizontalContentAlignment="Left"
-                 VirtualizingPanel.IsVirtualizing="False"
+                 HorizontalContentAlignment="Stretch"
+                 VirtualizingPanel.IsVirtualizing="True"
                  ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                  SelectionMode="Single"
-                 ItemTemplate="{StaticResource GridItemTemplate}"
-                 ItemsPanel="{StaticResource GridPanel}"
+                 ItemTemplate="{StaticResource ListItemTemplate}"
+                 ItemsPanel="{StaticResource ListPanel}"
                  SelectionChanged="ListSymbols_SelectionChanged">
 
             <ListBox.ItemContainerStyle>
@@ -318,7 +318,7 @@
                           HorizontalScrollBarVisibility="Disabled">
             <StackPanel>
                 <TextBlock Text="PROPERTIES"
-                           FontSize="9"
+                           FontSize="11"
                            FontWeight="Bold"
                            Foreground="#FF646464"
                            Margin="0,0,0,4"/>
@@ -327,7 +327,7 @@
                 <TextBlock x:Name="txtSymbolName"
                            Text="(select a symbol)"
                            FontWeight="Bold"
-                           FontSize="10"
+                           FontSize="11"
                            TextTrimming="CharacterEllipsis"
                            Margin="0,0,0,6"/>
 
@@ -340,19 +340,19 @@
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
                     <TextBlock Grid.Column="0" Text="Scale:"
-                               VerticalAlignment="Center" Margin="0,0,4,0" FontSize="10"/>
+                               VerticalAlignment="Center" Margin="0,0,4,0" FontSize="11"/>
                     <TextBox Grid.Column="1" x:Name="txtScale"
                              Text="1.000"
-                             FontSize="10"
+                             FontSize="11"
                              Padding="3,1"
                              Margin="0,0,8,0"
                              BorderBrush="#FFB4B4B4"
                              VerticalContentAlignment="Center"/>
                     <TextBlock Grid.Column="2" Text="Rotate°:"
-                               VerticalAlignment="Center" Margin="0,0,4,0" FontSize="10"/>
+                               VerticalAlignment="Center" Margin="0,0,4,0" FontSize="11"/>
                     <TextBox Grid.Column="3" x:Name="txtRotate"
                              Text="0.0"
-                             FontSize="10"
+                             FontSize="11"
                              Padding="3,1"
                              BorderBrush="#FFB4B4B4"
                              VerticalContentAlignment="Center"/>
@@ -361,18 +361,18 @@
                 <!-- Checkboxes row 1 -->
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,2">
                     <CheckBox x:Name="chkClipping" Content="Clipping"
-                              FontSize="10" Margin="0,0,14,0"/>
+                              FontSize="11" Margin="0,0,14,0"/>
                     <CheckBox x:Name="chkStatic"   Content="Static"
-                              FontSize="10"/>
+                              FontSize="11"/>
                 </StackPanel>
 
                 <!-- Checkboxes row 2 -->
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
                     <CheckBox x:Name="chkLeader" Content="Leader"
-                              FontSize="10" Margin="0,0,14,0"
+                              FontSize="11" Margin="0,0,14,0"
                               Checked="ChkLeader_Changed" Unchecked="ChkLeader_Changed"/>
                     <CheckBox x:Name="chkLeaderVisible" Content="Leader Visible"
-                              FontSize="10" IsEnabled="False"/>
+                              FontSize="11" IsEnabled="False"/>
                 </StackPanel>
 
                 <!-- Preview image -->
@@ -400,7 +400,7 @@
                 Padding="8,6">
             <StackPanel>
                 <TextBlock Text="REPLACE"
-                           FontSize="9"
+                           FontSize="11"
                            FontWeight="Bold"
                            Foreground="#FF646464"
                            Margin="0,0,0,4"/>
@@ -408,12 +408,12 @@
                 <!-- Replace (Pick Mode) — primary action -->
                 <Button x:Name="btnReplace"
                         Content="🔄  Replace  (Pick Mode)"
-                        Height="28"
+                        Height="32"
                         Margin="0,0,0,4"
                         IsEnabled="False"
                         Cursor="Hand"
                         Click="BtnReplace_Click"
-                        FontSize="10"
+                        FontSize="12"
                         Foreground="White"
                         Background="#FF0078D4"
                         BorderThickness="0">
@@ -450,11 +450,11 @@
                 <!-- Replace All — single button that opens dropdown menu -->
                 <Button x:Name="btnReplaceAll"
                         Content="Replace All  ▾"
-                        Height="24"
+                        Height="28"
                         Margin="0,0,0,6"
                         IsEnabled="False"
                         Cursor="Hand"
-                        FontSize="10"
+                        FontSize="12"
                         Click="BtnReplaceAll_Click">
                     <Button.ContextMenu>
                         <ContextMenu>
@@ -469,7 +469,7 @@
                 <Separator Margin="0,0,0,6" Background="#FFB4B4B4"/>
 
                 <TextBlock Text="SCAN"
-                           FontSize="9"
+                           FontSize="11"
                            FontWeight="Bold"
                            Foreground="#FF646464"
                            Margin="0,0,0,4"/>
@@ -477,20 +477,20 @@
                 <!-- Scan Sheet — highlight symbols not in palette -->
                 <Button x:Name="btnScanSheet"
                         Content="🔍  Scan Sheet"
-                        Height="24"
+                        Height="28"
                         Margin="0,0,0,3"
                         Cursor="Hand"
-                        FontSize="10"
+                        FontSize="12"
                         ToolTip="Highlight symbols on the active sheet that are NOT in this palette"
                         Click="BtnScanSheet_Click"/>
 
                 <!-- Clear Highlight -->
                 <Button x:Name="btnClearHighlight"
                         Content="✖  Clear Highlight"
-                        Height="22"
+                        Height="26"
                         IsEnabled="False"
                         Cursor="Hand"
-                        FontSize="10"
+                        FontSize="12"
                         Click="BtnClearHighlight_Click"/>
             </StackPanel>
         </Border>
@@ -503,7 +503,7 @@
                 Padding="8,4">
             <TextBlock x:Name="txtStatus"
                        Text="Ready"
-                       FontSize="10"
+                       FontSize="11"
                        Foreground="#FF3C3C3C"
                        TextWrapping="Wrap"/>
         </Border>
