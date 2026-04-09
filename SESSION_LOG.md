@@ -1,4 +1,4 @@
-# SESSION_LOG.md — Tiến độ theo session
+# SESSION_LOG.md — MCGInventorPlugin — Tiến độ theo session
 # Claude Code tự cập nhật file này. Không sửa thủ công phần log.
 
 ---
@@ -6,18 +6,32 @@
 ## ⚡ Trạng thái hiện tại — Đọc đây trước
 
 ```
+Project  : MCGInventorPlugin (module: Symbol Handler — Drawing) — ALL OK ✓
 Phase    : Phase 6 — DONE (trừ snap point)
 Bước     : Insert/Replace symbol hoàn chỉnh
-Trạng thái: [x] Replace leader restore — OK
-             [x] PromptStrings string[] — OK
-             [x] Position reset sau AddLeader — OK
-             [x] Insert attached vào edge (3D model) — OK
-             [x] Insert attached vào sketch line — OK
-             [x] Insert floating (click vùng trống) — OK
-             [x] Leader arrowhead filled solid — OK
-             [x] Keyboard input cho Scale/Rotate TextBox — OK
-             [x] Numeric-only filter — OK
-             [ ] Snap point (endpoint, midpoint, intersection) — CHƯA
+
+Trạng thái:
+  [x] Replace leader restore — OK
+  [x] PromptStrings string[] — OK
+  [x] Position reset sau AddLeader — OK
+  [x] Insert attached vào edge (3D model) — OK
+  [x] Insert attached vào sketch line — OK
+  [x] Insert floating (click vùng trống) — OK
+  [x] Leader arrowhead filled solid — OK
+  [x] Keyboard input cho Scale/Rotate TextBox — OK
+  [x] Numeric-only filter — OK
+  [x] Double-click insert — OK
+  [x] Continuous insert (re-enter mode sau mỗi insert, ESC thoát) — OK
+  [x] Arrow keys ↑↓ di chuyển symbol list — OK
+  [x] Default List view — OK
+  [x] Search + view mode switch không mất symbols — OK
+  [x] Font size tăng 10% (general) + 15% (buttons) — OK
+  [x] Inventor crash on close fix — OK
+  [x] Rename: Symbol Replacer → Symbol Handler — OK
+  [x] Helpers/ → Utilities/ — OK
+  [x] Tools/ folder (deploy.bat, resart.bat) — OK
+  [x] Xóa files không dùng (Register-Addin.reg, SymbolHandler_Test.csproj) — OK
+  [ ] Snap point (endpoint, midpoint, intersection) — CHƯA
 ```
 
 ### Làm ngay tiếp theo
@@ -50,6 +64,34 @@ Dev cycle: tự động đóng/mở Inventor (không hỏi user — xem memory f
 ```
 
 ---
+### Session: 2026-04-09 (run 11) — Refactor → MCGInventorPlugin module architecture
+
+**Ngày**: 2026-04-09
+
+**Major refactor:**
+- Project rename: SymbolHandler → **MCGInventorPlugin**
+- Module architecture: `Core/IModule` + `ModuleManager` + `Modules/SymbolHandlerModule`
+- Layer-first folder structure: `Controllers/SymbolHandler/`, `Services/SymbolHandler/`, etc.
+- Entry point: `MCGInventorPluginAddin.cs` → delegates to `ModuleManager`
+- Namespace: `MCGInventorPlugin.*` (Controllers.SymbolHandler, Services.SymbolHandler, etc.)
+
+**Files created:**
+| File | Mục đích |
+|------|---------|
+| `Core/IModule.cs` | Interface chung cho modules (Activate, CreateUI, Cleanup) |
+| `Core/ModuleManager.cs` | Đăng ký/lifecycle management modules |
+| `Modules/SymbolHandlerModule.cs` | Module Symbol Handler (Drawing) — implements IModule |
+| `MCGInventorPluginAddin.cs` | Entry point mới (COM GUID), dùng ModuleManager |
+
+**Files di chuyển:** Tất cả Controllers, Services, Views, Models → subfolder `SymbolHandler/`
+
+**Files xóa:** `SymbolHandlerAddin.cs` (thay bằng MCGInventorPluginAddin), `Register-Addin.reg`, `SymbolReplacer_Test.csproj`
+
+**Files rename:** `.csproj` → `MCGInventorPlugin.csproj`, `.addin` → `MCGInventorPlugin.addin`
+
+**Build**: PASS
+
+---
 
 ## 📋 Phase Checklist
 
@@ -67,36 +109,34 @@ Dev cycle: tự động đóng/mở Inventor (không hỏi user — xem memory f
 | `CLAUDE.md` | ✅ Done | Rules cố định |
 | `CONTEXT.md` | ✅ Done | Kiến trúc project |
 | `SESSION_LOG.md` | ✅ Done | File này |
-| `SymbolReplacer.csproj` | ✅ Done | net48, x64, WPF + WinForms |
-| `SymbolReplacer.addin` | ✅ Done | COM GUID đúng |
-| `SymbolReplacerAddin.cs` | ✅ Done | DI đầy đủ, đã xóa OnActivateDocument retry |
+| `MCGInventorPlugin.csproj` | ✅ Done | net48, x64, WPF + WinForms |
+| `MCGInventorPlugin.addin` | ✅ Done | COM GUID đúng |
+| `MCGInventorPluginAddin.cs` | ✅ Done | DI đầy đủ, đã xóa OnActivateDocument retry |
 | `Resources/ReplaceSymbol_32.png` | ✅ Done | |
 | `Resources/ReplaceSymbol_16.png` | ✅ Done | |
 | `Models/SymbolDefinitionModel.cs` | ✅ Done | |
 | `Models/LibraryConfigModel.cs` | ✅ Done | |
-| `Models/ReplaceOperationModel.cs` | ❌ Không cần | Không dùng trong kiến trúc hiện tại |
-| `Views/SymbolReplacerPanel.xaml` | ✅ Done | WPF; GridSplitter resizable properties; Local/File source tab |
-| `Views/SymbolReplacerPanel.xaml.cs` | ✅ Done | Lazy ContextMenu; ViewMode save/restore ItemsSource; SourceMode_Changed |
+| `Views/SymbolHandlerPanel.xaml` | ✅ Done | WPF; List default; GridSplitter; Local/File source; Font size adjusted |
+| `Views/SymbolHandlerPanel.xaml.cs` | ✅ Done | Keyboard fix (WM_GETDLGCODE); double-click insert; numeric filter; ViewModeChanged event |
 | `Views/WpfSymbolGrid.cs` | ✅ Done | Wrapper ListBox, ConvertBitmapToSource |
-| `Views/SymbolReplacerPanel.cs` | 🗑️ Đã xóa | WinForms cũ — thay bằng WPF XAML |
-| `Views/ThumbnailGridControl.cs` | 🗑️ Đã xóa | WinForms cũ — thay bằng WpfSymbolGrid |
-| `Controllers/RibbonController.cs` | ✅ Done | AssemblyResolve BAML fix; HwndSource embed; DockWindowSizer |
-| `Controllers/PaletteController.cs` | ✅ Done | Local source; Scan/Highlight; Search filter |
-| `Controllers/ReplaceController.cs` | ✅ Done | Replace Single/All; Insert mode |
-| `Controllers/InteractionController.cs` | ✅ Done | Pick mode; Insert mode; ESC cancel |
-| `Services/ILibraryService.cs` | ✅ Done | Thêm LoadLocalDefinitions() |
-| `Services/LibraryService.cs` | ✅ Done | Folder + single .idw + Local doc |
+| `Controllers/RibbonController.cs` | ✅ Done | Symbol Handler display name; AssemblyResolve BAML fix; HwndSource embed |
+| `Controllers/PaletteController.cs` | ✅ Done | Local source; Scan/Highlight; Search filter; ViewModeChanged handler; safe Cleanup |
+| `Controllers/ReplaceController.cs` | ✅ Done | Replace Single/All; Continuous insert (Dispatcher delay re-enter) |
+| `Controllers/InteractionController.cs` | ✅ Done | Pick mode (SelectEvents); Insert mode (dual SelectEvents+MouseEvents); InsertPickEventArgs |
+| `Services/ILibraryService.cs` | ✅ Done | LoadLocalDefinitions() |
+| `Services/LibraryService.cs` | ✅ Done | Folder + single .idw + Local doc; safe CloseLibrary (check COM valid) |
 | `Services/IThumbnailService.cs` | ✅ Done | |
 | `Services/ThumbnailService.cs` | ✅ Done | GDI render + cache |
-| `Services/ISymbolReplaceService.cs` | ✅ Done | |
-| `Services/SymbolReplaceService.cs` | ✅ Done | Replace leader OK; Insert attach OK; `AttachLeaderToGeometry()` + `FindNearestDrawingCurve()` + `TryAddLeader()`; `BuildPromptStrings()` → `string[]` |
+| `Services/ISymbolReplaceService.cs` | ✅ Done | InsertSymbol + attachGeometry param |
+| `Services/SymbolReplaceService.cs` | ✅ Done | Replace leader; Insert attach; FindNearestDrawingCurve; TryAddLeader; PromptStrings string[] |
 | `Services/IConfigService.cs` | ✅ Done | |
 | `Services/ConfigService.cs` | ✅ Done | |
-| `Helpers/PictureDispConverter.cs` | ✅ Done | |
-| `Helpers/CoordinateHelper.cs` | ✅ Done | |
-| `Helpers/GdiRenderHelper.cs` | ✅ Done | |
-| `probe/ProbeInvApi.cs` | ✅ Done | Reflection probe — khám phá Inventor API members (không build cùng main project) |
-| `deploy.bat` | ✅ Done | Copy dll+addin vào %AppData% |
+| `Utilities/PictureDispConverter.cs` | ✅ Done | Bitmap → stdole.IPictureDisp |
+| `Utilities/CoordinateHelper.cs` | ✅ Done | 2D coordinate transform |
+| `Utilities/GdiRenderHelper.cs` | ✅ Done | GDI+ drawing utilities |
+| `Tools/deploy.bat` | ✅ Done | Build + verify DLL; guard Inventor |
+| `Tools/resart.bat` | ✅ Done | Đóng/mở Inventor với file test |
+| `probe/ProbeInvApi.cs` | ✅ Done | Reflection probe — runtime Inventor API (không build cùng main) |
 
 **Ký hiệu**: ✅ Done — 🔧 Có bug — ❌ Chưa làm — ⏳ Đang làm
 
@@ -119,6 +159,23 @@ Dev cycle: tự động đóng/mở Inventor (không hỏi user — xem memory f
 <!-- Giữ lại tối đa 10 session gần nhất -->
 
 ---
+### Session: 2026-04-09 (run 10) — Rename + Double-click insert + Continuous insert + Arrow keys
+
+**Ngày**: 2026-04-09
+
+**Thay đổi:**
+| # | Feature/Fix | File |
+|---|-------------|------|
+| 1 | Project rename: Symbol Replacer → **Symbol Handler** | `MCGInventorPlugin.addin` (DisplayName, Description), `Controllers/RibbonController.cs` (BUTTON_DISPLAY, TOOLTIP, DOCKWIN_TITLE, DOCKWIN_ID) |
+| 2 | Double-click symbol → insert mode | `Views/SymbolHandlerPanel.xaml.cs` — `ListSymbols_MouseDoubleClick` |
+| 3 | Insert liên tục (re-enter insert mode sau mỗi insert cho đến ESC) | `Controllers/ReplaceController.cs` — `Dispatcher.BeginInvoke` delay re-enter |
+| 4 | Arrow keys ↑↓ di chuyển qua symbols trong list | `Views/SymbolHandlerPanel.xaml.cs` — `WndProcHook` thêm `ListBox`/`ListBoxItem` check |
+| 5 | Fix crash khi re-enter insert mode ngay sau insert | `Controllers/ReplaceController.cs` — `DispatcherPriority.Background` delay |
+
+**Lưu ý DockableWindow ID thay đổi:** `SymbolHandler.DockableWindow` → `SymbolHandling.DockableWindow`
+Nếu Inventor cache DockableWindow cũ → có thể cần xóa Inventor workspace cache hoặc restart sạch.
+
+---
 ### Session: 2026-04-09 (run 9) — UI polish + Bug fixes + Font size
 
 **Ngày**: 2026-04-09
@@ -129,10 +186,10 @@ Dev cycle: tự động đóng/mở Inventor (không hỏi user — xem memory f
 |---|-----|------|
 | 1 | Inventor crash khi đóng: `doc.Close()` trên COM object đã release | `Services/LibraryService.cs` — kiểm tra `doc.FullFileName` trước Close |
 | 2 | Inventor crash khi đóng: PaletteController.Cleanup không có try/catch | `Controllers/PaletteController.cs` — wrap từng bước cleanup |
-| 3 | Default List view thay vì Grid | `Views/SymbolReplacerPanel.xaml` — `IsChecked` đổi sang `rbListView` |
-| 4 | Mất symbol khi đổi Grid↔List: `SetItems` tạo list mới, restore reference cũ stale | `Views/SymbolReplacerPanel.xaml.cs` — raise `ViewModeChanged` → PaletteController `ApplyFilter()` |
-| 5 | Mất symbol khi xóa search + đổi view: `SetSearchPlaceholder` set flag SAU Text | `Views/SymbolReplacerPanel.xaml.cs` — set `_searchIsPlaceholder = true` TRƯỚC `txtSearch.Text` |
-| 6 | Font size tăng 10% (general) + 15% (buttons) + giữ nguyên file path | `Views/SymbolReplacerPanel.xaml` |
+| 3 | Default List view thay vì Grid | `Views/SymbolHandlerPanel.xaml` — `IsChecked` đổi sang `rbListView` |
+| 4 | Mất symbol khi đổi Grid↔List: `SetItems` tạo list mới, restore reference cũ stale | `Views/SymbolHandlerPanel.xaml.cs` — raise `ViewModeChanged` → PaletteController `ApplyFilter()` |
+| 5 | Mất symbol khi xóa search + đổi view: `SetSearchPlaceholder` set flag SAU Text | `Views/SymbolHandlerPanel.xaml.cs` — set `_searchIsPlaceholder = true` TRƯỚC `txtSearch.Text` |
+| 6 | Font size tăng 10% (general) + 15% (buttons) + giữ nguyên file path | `Views/SymbolHandlerPanel.xaml` |
 
 **Font size changes:**
 | Loại | Trước | Sau |
@@ -166,7 +223,7 @@ Dev cycle: tự động đóng/mở Inventor (không hỏi user — xem memory f
 | `Services/SymbolReplaceService.cs` | `AttachLeaderToGeometry()` resolve DrawingCurveSegment→Parent, DrawingSketch→FindNearestDrawingCurve, retry AddLeader; `TryAddLeader()` với leader properties (LeaderVisible, LeaderClipping, ArrowheadType); `FindNearestDrawingCurve()` với distance threshold 0.5cm; `InsertSymbol()` auto-resolve geometry khi null |
 | `Services/ISymbolReplaceService.cs` | `InsertSymbol` thêm `object attachGeometry = null` |
 | `Controllers/ReplaceController.cs` | `OnInsertPointPicked` nhận `InsertPickEventArgs` |
-| `Views/SymbolReplacerPanel.xaml.cs` | Keyboard fix: `WM_GETDLGCODE → DLGC_WANTALLKEYS` + `WH_GETMESSAGE` hook redirect; numeric-only filter (`PreviewTextInput` + paste handler) |
+| `Views/SymbolHandlerPanel.xaml.cs` | Keyboard fix: `WM_GETDLGCODE → DLGC_WANTALLKEYS` + `WH_GETMESSAGE` hook redirect; numeric-only filter (`PreviewTextInput` + paste handler) |
 | `resart.bat` | `TEST_FILE_DEFAULT` cập nhật sang CAS-0033254.idw |
 
 **Inventor API facts xác nhận qua probe (session này):**
@@ -364,7 +421,7 @@ Thứ tự restore SAU khi insert newSym:
 | File | Thay đổi |
 |------|---------|
 | `Services/SymbolReplaceService.cs` | Snapshot + restore `_AttachedEntity` + `Static`; xóa `FindAttachedView()` sai; đơn giản hóa `GetSheetFromSymbol()` |
-| `SymbolReplacer.csproj` | Exclude `probe/` subfolder khỏi build |
+| `MCGInventorPlugin.csproj` | Exclude `probe/` subfolder khỏi build |
 | `probe/ProbeInvApi.cs` | Script dùng reflection để khám phá Inventor API (giữ để tham khảo) |
 
 **Build**: PASS (0 errors)
@@ -376,8 +433,8 @@ Thứ tự restore SAU khi insert newSym:
 
 | # | Task | File | Status |
 |---|------|------|--------|
-| 1 | Fix view toggle mất symbols | SymbolReplacerPanel.xaml.cs `ViewMode_Changed` — save/restore ItemsSource | ✅ Done |
-| 2 | Properties panel resizable (GridSplitter) | SymbolReplacerPanel.xaml — Row 3 splitter, Properties → Row 4 `Height=180 MinHeight=60` | ✅ Done |
+| 1 | Fix view toggle mất symbols | SymbolHandlerPanel.xaml.cs `ViewMode_Changed` — save/restore ItemsSource | ✅ Done |
+| 2 | Properties panel resizable (GridSplitter) | SymbolHandlerPanel.xaml — Row 3 splitter, Properties → Row 4 `Height=180 MinHeight=60` | ✅ Done |
 | 3 | Local source tab (SOURCE: File / Local) | Panel.xaml + xaml.cs + ILibraryService + LibraryService + PaletteController | ✅ Done |
 
 ---
@@ -398,15 +455,15 @@ Thứ tự restore SAU khi insert newSym:
 **Fixes trong session này**:
 - BAML connectionId lỗi: `ContextMenuInsert_Click` trong Style `<Setter><ContextMenu>` → đã di chuyển ContextMenu ra khỏi XAML style, tạo lazy trong code-behind qua `PreviewMouseRightButtonDown`
 - Removed `OnActivateDocument` retry mechanism (user yêu cầu không cần mở/đóng Inventor)
-- Added `AppDomain.CurrentDomain.AssemblyResolve` hook quanh `new SymbolReplacerPanel()` để giải quyết BAML assembly resolution trong COM host
+- Added `AppDomain.CurrentDomain.AssemblyResolve` hook quanh `new SymbolHandlerPanel()` để giải quyết BAML assembly resolution trong COM host
 
 **Files đã sửa trong session này**:
 | File | Thay đổi |
 |------|---------|
-| `Views/SymbolReplacerPanel.xaml` | Xóa `EventSetter` + Xóa `<ContextMenu>` khỏi ItemContainerStyle |
-| `Views/SymbolReplacerPanel.xaml.cs` | Lazy ContextMenu trong `ListSymbols_PreviewMouseRightButtonDown` |
+| `Views/SymbolHandlerPanel.xaml` | Xóa `EventSetter` + Xóa `<ContextMenu>` khỏi ItemContainerStyle |
+| `Views/SymbolHandlerPanel.xaml.cs` | Lazy ContextMenu trong `ListSymbols_PreviewMouseRightButtonDown` |
 | `Controllers/RibbonController.cs` | `AssemblyResolve` hook + `OnBamlAssemblyResolve` method |
-| `SymbolReplacerAddin.cs` | Xóa `_appEvents`, `OnActivateDocument`, `_ribbonUICreated` retry |
+| `MCGInventorPluginAddin.cs` | Xóa `_appEvents`, `OnActivateDocument`, `_ribbonUICreated` retry |
 
 **Build**: PASS
 
@@ -428,10 +485,10 @@ Thứ tự restore SAU khi insert newSym:
 **Files đã sửa**:
 | File | Thay đổi |
 |------|---------|
-| `Views/SymbolReplacerPanel.xaml` | Full rewrite — 4 Resources (2 DataTemplates, 2 ItemsPanelTemplates, 1 Style), Row 0 TextBox, Row 1 toggle, Row 2 ContextMenu, Row 4 Replace All + Scan section |
-| `Views/SymbolReplacerPanel.xaml.cs` | Full rewrite — 8 new handlers, 2 new events, 3 new public methods |
+| `Views/SymbolHandlerPanel.xaml` | Full rewrite — 4 Resources (2 DataTemplates, 2 ItemsPanelTemplates, 1 Style), Row 0 TextBox, Row 1 toggle, Row 2 ContextMenu, Row 4 Replace All + Scan section |
+| `Views/SymbolHandlerPanel.xaml.cs` | Full rewrite — 8 new handlers, 2 new events, 3 new public methods |
 | `Controllers/PaletteController.cs` | Add `_app` param, ScanAndHighlight, ClearHighlight, 2 new event handlers |
-| `SymbolReplacerAddin.cs` | Pass `_app` to PaletteController |
+| `MCGInventorPluginAddin.cs` | Pass `_app` to PaletteController |
 
 **Build**: PASS (0 errors)
 
@@ -467,11 +524,11 @@ Thứ tự restore SAU khi insert newSym:
 **Vấn đề**:
 | Root Cause | Hậu quả | Fix |
 |-----------|---------|-----|
-| `SplitContainer.SplitterDistance = 260` trong object initializer khi UserControl.Height = 0 → `ArgumentOutOfRangeException` | Constructor SymbolReplacerPanel throw → Activate() catch + `throw;` → Inventor nhận exception → không gọi Deactivate() → COM leak → "37 objects not released" → TerminateProcess → Inventor crash | Xóa SplitterDistance khỏi initializer; set trong `OnLayout` override sau khi có kích thước thực |
+| `SplitContainer.SplitterDistance = 260` trong object initializer khi UserControl.Height = 0 → `ArgumentOutOfRangeException` | Constructor SymbolHandlerPanel throw → Activate() catch + `throw;` → Inventor nhận exception → không gọi Deactivate() → COM leak → "37 objects not released" → TerminateProcess → Inventor crash | Xóa SplitterDistance khỏi initializer; set trong `OnLayout` override sau khi có kích thước thực |
 | `Activate()` có `throw;` trong outer catch | Inventor crash (TerminateProcess) thay vì graceful disable | Bỏ `throw;` — log lỗi và return, Inventor disable addin nhưng không crash |
 | `deploy.bat` dùng `dotnet` không có full path | "No .NET SDKs were found" khi bat file chạy | Sửa thành `"C:\Program Files\dotnet\dotnet.exe"` |
 
-**Files đã sửa**: `Views/SymbolReplacerPanel.cs`, `SymbolReplacerAddin.cs`, `deploy.bat`
+**Files đã sửa**: `Views/SymbolHandlerPanel.cs`, `MCGInventorPluginAddin.cs`, `deploy.bat`
 
 ---
 ### Session: 2026-04-07 (run 1) — Fix palette empty + Properties panel redesign
@@ -494,8 +551,8 @@ Thứ tự restore SAU khi insert newSym:
 | File | Thay đổi |
 |------|---------|
 | `Controllers/RibbonController.cs` | Thêm GetWindowLong/SetWindowLong/ShowWindow/GetClientRect Win32 imports; EmbedWinFormsPanel 3 fixes |
-| `Views/SymbolReplacerPanel.cs` | Đổi `Form` → `UserControl`; Properties panel: Scale/Rotate textbox, 4 checkboxes, PictureBox preview |
-| `SymbolReplacerAddin.cs` | Xóa WinForms Application init calls; thêm OnActivateDocument retry logic |
+| `Views/SymbolHandlerPanel.cs` | Đổi `Form` → `UserControl`; Properties panel: Scale/Rotate textbox, 4 checkboxes, PictureBox preview |
+| `MCGInventorPluginAddin.cs` | Xóa WinForms Application init calls; thêm OnActivateDocument retry logic |
 | `Services/ISymbolReplaceService.cs` | InsertSymbol thêm rotation + scale params |
 | `Services/SymbolReplaceService.cs` | InsertSymbol implementation với rotation + scale |
 | `Controllers/ReplaceController.cs` | OnInsertPointPicked đọc scale/rotation từ panel |
@@ -522,10 +579,10 @@ Thứ tự restore SAU khi insert newSym:
 **Files đã sửa**:
 | File | Thay đổi |
 |------|---------|
-| `Views/SymbolReplacerPanel.cs` | Thêm 3 events + wire button handlers |
-| `SymbolReplacerAddin.cs` | DI wiring: InteractionController, SymbolReplaceService, ReplaceController |
+| `Views/SymbolHandlerPanel.cs` | Thêm 3 events + wire button handlers |
+| `MCGInventorPluginAddin.cs` | DI wiring: InteractionController, SymbolReplaceService, ReplaceController |
 | `Models/ReplaceOperationModel.cs` | Tạo mới — snapshot model |
-| `SymbolReplacer.csproj` | Fix InventorPublicAssembliesPath, RegisterForComInterop condition |
+| `MCGInventorPlugin.csproj` | Fix InventorPublicAssembliesPath, RegisterForComInterop condition |
 | `Services/LibraryService.cs` | Fix Path/Directory ambiguity với Inventor.Path |
 | `Services/SymbolReplaceService.cs` | Fix stale Point2d + cross-doc definition + (_Document) cast |
 
@@ -561,8 +618,8 @@ Thứ tự restore SAU khi insert newSym:
 
 | Vấn đề | File | Chi tiết |
 |--------|------|---------|
-| Missing events | `Views/SymbolReplacerPanel.cs` | ReplaceController subscribe 3 events không tồn tại trên panel |
-| Missing DI wiring | `SymbolReplacerAddin.cs` | InteractionController, SymbolReplaceService, ReplaceController chưa được tạo trong Activate() |
+| Missing events | `Views/SymbolHandlerPanel.cs` | ReplaceController subscribe 3 events không tồn tại trên panel |
+| Missing DI wiring | `MCGInventorPluginAddin.cs` | InteractionController, SymbolReplaceService, ReplaceController chưa được tạo trong Activate() |
 | Missing model | `Models/ReplaceOperationModel.cs` | File chưa tồn tại |
 
 **Phát hiện API quirks**:
@@ -575,13 +632,13 @@ Thứ tự restore SAU khi insert newSym:
 
 **Bước tiếp theo** (session sau bắt đầu từ đây):
 ```
-1. Views/SymbolReplacerPanel.cs:
+1. Views/SymbolHandlerPanel.cs:
    - Thêm events: ReplaceRequested, ReplaceAllCurrentSheetRequested, ReplaceAllAllSheetsRequested
    - Sửa OnReplaceClick → raise ReplaceRequested
    - Sửa OnReplaceAllCurrentSheetClick → raise ReplaceAllCurrentSheetRequested
    - Sửa OnReplaceAllAllSheetsClick → raise ReplaceAllAllSheetsRequested
 
-2. SymbolReplacerAddin.cs → Activate():
+2. MCGInventorPluginAddin.cs → Activate():
    - Thêm fields: _interactionController, _symbolReplaceService, _replaceController
    - Trong Activate(): new InteractionController(_app), new SymbolReplaceService(_app),
      new ReplaceController(_app, _symbolReplaceService, _interactionController, _paletteController)

@@ -43,17 +43,17 @@ Không bao giờ tự ý bắt đầu làm việc trước khi user xác nhận.
 ### Hai lệnh cốt lõi
 
 ```
-deploy.bat                          ← Build + verify DLL
-restart.bat "đường\dẫn\file.idw"   ← Đóng Inventor, mở lại với file test
+Tools\deploy.bat                          ← Build + verify DLL
+Tools\resart.bat "đường\dẫn\file.idw"    ← Đóng Inventor, mở lại với file test
 ```
 
 File test mặc định nếu không truyền tham số:
 
 ```
-C:\TestFiles\TestDrawing.idw
+C:\MacGregor_CAS_WF\Designs\40 Products\DOOR\EXTERNAL DOOR\Vertical Sliding Door\Part Complete\400284387- X2 WWL\Mech\CAS-0033254.idw
 ```
 
-→ Cập nhật đường dẫn thực tế tại biến `TEST_FILE_DEFAULT` trong `restart.bat`.
+→ Cập nhật đường dẫn thực tế tại biến `TEST_FILE_DEFAULT` trong `Tools\resart.bat`.
 
 ---
 

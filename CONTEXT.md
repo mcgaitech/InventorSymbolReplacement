@@ -1,12 +1,13 @@
-# CONTEXT.md — SymbolReplacer
+# CONTEXT.md — MCGInventorPlugin
 
-# Inventor 2023 AddIn | C# | WPF | VS Code
+# Autodesk Inventor 2023 AddIn | C# | WPF | VS Code
 
 ---
 
 ## Thông tin project
 
-- **Tên project**: SymbolReplacer
+- **Tên project**: MCGInventorPlugin
+- **Module hiện tại**: Symbol Handler (Drawing environment)
 - **Phần mềm đích**: Inventor 2023
 - **Loại output**: Inventor AddIn (COM .dll + .addin)
 - **GUID**: `{7C3D8E4F-2A1B-4C5D-9E8F-1A2B3C4D5E6F}`
@@ -31,7 +32,7 @@ Trong bản vẽ IDW của Inventor, người dùng cần thay thế các Sketch
 
 **Workflow sau khi có tool**:
 
-1. Mở palette Symbol Replacer từ ribbon Custom Tools
+1. Mở palette Symbol Handler từ ribbon Custom Tools
 2. Chọn symbol mới từ danh sách thumbnail trong palette
 3. Click "Replace" → click vào symbol cũ trên bản vẽ → replace ngay
 4. Hoặc "Replace All" → chọn phạm vi (Current Sheet / All Sheets) → confirm → done
@@ -41,55 +42,63 @@ Trong bản vẽ IDW của Inventor, người dùng cần thay thế các Sketch
 ## Kiến trúc thư mục
 
 ```
-SymbolReplacer/
-├── CLAUDE.md
-├── CONTEXT.md
-├── SESSION_LOG.md
-├── SymbolReplacer.csproj
-├── SymbolReplacer.addin
-├── SymbolReplacerAddin.cs          ← Entry point, COM [Guid], ApplicationAddInServer
+MCGInventorPlugin/
+├── CLAUDE.md                       ← Rules và patterns cho Claude Code
+├── CONTEXT.md                      ← Kiến trúc chi tiết project
+├── SESSION_LOG.md                  ← Trạng thái mới nhất, bước tiếp theo
+├── MCGInventorPlugin.csproj
+├── MCGInventorPlugin.addin
+├── MCGInventorPluginAddin.cs       ← Entry point duy nhất (COM GUID)
 │
-├── Resources/
-│   ├── ReplaceSymbol_32.png        ← Icon ribbon 32x32
-│   └── ReplaceSymbol_16.png        ← Icon ribbon 16x16
+├── Core/                            ← Shared infrastructure
+│   ├── IModule.cs                   ← Interface chung cho mọi module
+│   └── ModuleManager.cs             ← Đăng ký/khởi tạo/cleanup modules
 │
-├── Models/
-│   ├── SymbolDefinitionModel.cs    ← Tên symbol, thumbnail bitmap, definition ref
-│   ├── ReplaceOperationModel.cs    ← Snapshot properties của symbol cũ
-│   └── LibraryConfigModel.cs      ← Library path, last used path
-│
-├── Views/
-│   ├── SymbolReplacerPanel.xaml    ← WPF UserControl nhúng vào DockableWindow
-│   ├── SymbolReplacerPanel.xaml.cs
-│   ├── ConfirmReplaceAllDialog.xaml
-│   ├── ConfirmReplaceAllDialog.xaml.cs
-│   └── Styles/
-│       └── SharedStyles.xaml       ← ResourceDictionary màu sắc, font chuẩn
-│
-├── ViewModels/
-│   ├── SymbolReplacerViewModel.cs
-│   └── ConfirmReplaceAllViewModel.cs
+├── Modules/
+│   └── SymbolHandlerModule.cs       ← Module Symbol Handler (Drawing)
 │
 ├── Controllers/
-│   ├── RibbonController.cs         ← Tạo tab Custom Tools, button, DockableWindow
-│   ├── PaletteController.cs        ← Load symbols, search, selection
-│   ├── ReplaceController.cs        ← Logic replace single + all
-│   └── InteractionController.cs    ← InteractionEvents pick mode
+│   └── SymbolHandler/               ← Controllers cho module Symbol Handler
+│       ├── RibbonController.cs
+│       ├── PaletteController.cs
+│       ├── ReplaceController.cs
+│       └── InteractionController.cs
 │
 ├── Services/
-│   ├── ILibraryService.cs
-│   ├── LibraryService.cs           ← Mở .idw library ẩn, đọc definitions
-│   ├── IThumbnailService.cs
-│   ├── ThumbnailService.cs         ← GDI+ render thumbnail + Dictionary cache
-│   ├── ISymbolReplaceService.cs
-│   ├── SymbolReplaceService.cs     ← Core replace logic + TransactionManager
-│   ├── IConfigService.cs
-│   └── ConfigService.cs            ← Đọc/ghi config.json
+│   └── SymbolHandler/               ← Services cho module Symbol Handler
+│       ├── ILibraryService.cs + LibraryService.cs
+│       ├── IThumbnailService.cs + ThumbnailService.cs
+│       ├── ISymbolReplaceService.cs + SymbolReplaceService.cs
+│       └── IConfigService.cs + ConfigService.cs
 │
-└── Helpers/
-    ├── PictureDispConverter.cs     ← Bitmap → stdole.IPictureDisp cho ribbon icon
-    ├── CoordinateHelper.cs         ← 2D coordinate transform cho thumbnail
-    └── GdiRenderHelper.cs          ← GDI+ drawing utilities
+├── Views/
+│   └── SymbolHandler/               ← Views cho module Symbol Handler
+│       ├── SymbolHandlerPanel.xaml + .cs
+│       └── WpfSymbolGrid.cs
+│
+├── Models/
+│   └── SymbolHandler/               ← Models cho module Symbol Handler
+│       ├── SymbolDefinitionModel.cs
+│       └── LibraryConfigModel.cs
+│
+├── Utilities/                       ← Dùng chung mọi module
+│   ├── PictureDispConverter.cs
+│   ├── CoordinateHelper.cs
+│   └── GdiRenderHelper.cs
+│
+├── Resources/                       ← Icons dùng chung
+│   ├── ReplaceSymbol_32.png
+│   └── ReplaceSymbol_16.png
+│
+├── Tools/
+│   ├── deploy.bat
+│   ├── resart.bat
+│   ├── CLAUDE_CODE_PROMPT_GUIDE.md
+│   └── START.md                    ← Prompt mở đầu session
+│
+└── probe/
+    ├── ProbeInvApi.cs              ← Reflection tool khám phá Inventor API runtime
+    └── ProbeInvApi.csproj
 ```
 
 ---
@@ -137,7 +146,7 @@ SymbolReplacer/
 | --- | -------------------------------------------------------------- | ------------------------------------------------- |
 | 1   | UI dùng WPF thay WinForms                                      | MVVM pattern, binding, styling dễ hơn             |
 | 2   | Embed WPF vào DockableWindow qua HwndSource                    | Inventor DockableWindow chỉ nhận Win32 HWND       |
-| 3   | DI thủ công trong `SymbolReplacerAddin.Activate()`             | Tránh thêm dependency framework phức tạp          |
+| 3   | DI thủ công trong `SymbolHandlerAddin.Activate()`             | Tránh thêm dependency framework phức tạp          |
 | 4   | Symbol source: Library file + Working file kết hợp             | User không cần copy/paste thủ công                |
 | 5   | Library default path: `C:\server\System\2023\Inventor\Library` | Đường dẫn server chuẩn của công ty                |
 | 6   | Mở library file ở chế độ ẩn (`openVisible: false`)             | Không làm phiền workflow user                     |
@@ -243,7 +252,7 @@ ie.Start();
 
 ## Config / Settings
 
-**Config file**: `%AppData%\YourCompany\SymbolReplacer\config.json`
+**Config file**: `%AppData%\YourCompany\SymbolHandler\config.json`
 
 ```json
 {
@@ -263,11 +272,11 @@ ie.Start();
 **Mục tiêu**: Addin load được, button hiện trên ribbon, palette mở được.
 **Files đã tạo**:
 
-- `SymbolReplacer.csproj` ← cần fix `InventorBinPath` theo máy thực tế
-- `SymbolReplacer.addin`
-- `SymbolReplacerAddin.cs`
+- `MCGInventorPlugin.csproj` ← cần fix `InventorBinPath` theo máy thực tế
+- `MCGInventorPlugin.addin`
+- `MCGInventorPluginAddin.cs`
 - `Controllers/RibbonController.cs`
-- `Views/SymbolReplacerPanel.cs` ← WinForms tạm, Phase 2 chuyển sang WPF
+- `Views/SymbolHandlerPanel.cs` ← WinForms tạm, Phase 2 chuyển sang WPF
 - `Helpers/PictureDispConverter.cs`
 
 **Vấn đề tồn đọng**:
@@ -298,9 +307,9 @@ ie.Start();
 - `Services/ILibraryService.cs` + `LibraryService.cs`
 - `Services/IThumbnailService.cs` + `ThumbnailService.cs`
 - `Services/IConfigService.cs` + `ConfigService.cs`
-- `Views/SymbolReplacerPanel.xaml` + `.xaml.cs` ← thay thế WinForms
+- `Views/SymbolHandlerPanel.xaml` + `.xaml.cs` ← thay thế WinForms
 - `Views/Styles/SharedStyles.xaml`
-- `ViewModels/SymbolReplacerViewModel.cs`
+- `ViewModels/SymbolHandlerViewModel.cs`
 - `Helpers/CoordinateHelper.cs`
 - `Helpers/GdiRenderHelper.cs`
 
@@ -341,5 +350,5 @@ ie.Start();
 | #   | Vấn đề                                       | Nguyên nhân                                      | Giải pháp                                     |
 | --- | -------------------------------------------- | ------------------------------------------------ | --------------------------------------------- |
 | 1   | Build lỗi CS0246                             | HintPath sai đường dẫn DLL                       | Cập nhật `<InventorBinPath>` trong `.csproj`  |
-| 2   | `$(AppData)` không hợp lệ trong `.addin` XML | `.addin` là XML thuần, không expand MSBuild vars | Dùng đường dẫn tương đối `SymbolReplacer.dll` |
+| 2   | `$(AppData)` không hợp lệ trong `.addin` XML | `.addin` là XML thuần, không expand MSBuild vars | Dùng đường dẫn tương đối `SymbolHandler.dll` |
 | 3   | `EmbedInteropTypes` phải là `False`          | Inventor API resolve interfaces lúc runtime      | Đã fix trong `.csproj`                        |
