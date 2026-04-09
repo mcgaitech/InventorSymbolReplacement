@@ -77,9 +77,21 @@ namespace MCGInventorPlugin.Modules
             try { SymbolHandlerPanel.CleanupKeyboardHook(); }
             catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI keyboard cleanup: {ex.Message}"); }
 
-            try { _replaceController?.Cleanup(); } catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI: {ex.Message}"); }
-            try { _paletteController?.Cleanup(); } catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI: {ex.Message}"); }
-            try { _ribbonController?.Cleanup(); }  catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI: {ex.Message}"); }
+            // Controllers cleanup — thứ tự ngược với Activate (LIFO)
+            try { _replaceController?.Cleanup(); }      catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI ReplaceController: {ex.Message}"); }
+            try { _interactionController?.Cleanup(); }   catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI InteractionController: {ex.Message}"); }
+            try { _paletteController?.Cleanup(); }       catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI PaletteController: {ex.Message}"); }
+            try { _ribbonController?.Cleanup(); }        catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI RibbonController: {ex.Message}"); }
+
+            // Giải phóng references — Services không có Cleanup() riêng nhưng cần null hóa
+            _replaceController     = null;
+            _interactionController = null;
+            _paletteController     = null;
+            _ribbonController      = null;
+            _symbolReplaceService  = null;
+            _thumbnailService      = null;
+            _libraryService        = null;
+            _configService         = null;
 
             Debug.WriteLine($"{LOG_PREFIX} Cleanup THÀNH CÔNG.");
         }

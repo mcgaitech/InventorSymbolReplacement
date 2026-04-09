@@ -64,6 +64,31 @@ Dev cycle: tự động đóng/mở Inventor (không hỏi user — xem memory f
 ```
 
 ---
+### Session: 2026-04-09 (run 12) — Memory audit + Cleanup fixes + UI fixes
+
+**Ngày**: 2026-04-09
+
+**Memory/Cleanup audit kết quả:**
+- Audit toàn bộ 10 files liên quan cleanup/memory/crash
+- **Fix 1**: `SymbolHandlerModule.Cleanup()` — thêm `InteractionController.Cleanup()` (bị thiếu)
+- **Fix 2**: `SymbolHandlerModule.Cleanup()` — null hóa tất cả controller + service refs sau cleanup
+- **Fix 3**: Cleanup order LIFO: Replace → Interaction → Palette → Ribbon → Services
+
+**UI fixes:**
+- Palette tự hiện khi mở Inventor → force `Visible=false` sau `CreateDockableWindow()`
+- Palette không hiển thị hết lần đầu → delayed resize timer 500ms sau embed
+- Old addin files conflict (SymbolReplacer.*, SymbolHandler.*) → xóa trong Addins folder
+- Icon resource path: `MCGInventorPlugin.Resources.SymbolHandler.` (csproj + PictureDispConverter)
+
+**Không phát hiện vấn đề:**
+- COM document cleanup: LibraryService kiểm tra valid trước Close ✓
+- Bitmap disposal: ThumbnailService + SymbolDefinitionModel ✓
+- Event unsubscribe: InteractionController, PaletteController ✓
+- HwndSource + Timer: RibbonController ✓
+- TransientObjects: dùng local, không giữ field ✓
+- WndProcHook: auto-cleanup khi HwndSource.Dispose ✓
+
+---
 ### Session: 2026-04-09 (run 11) — Refactor → MCGInventorPlugin module architecture
 
 **Ngày**: 2026-04-09
