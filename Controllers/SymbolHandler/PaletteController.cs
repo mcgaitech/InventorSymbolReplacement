@@ -405,6 +405,10 @@ namespace MCGInventorPlugin.Controllers.SymbolHandler
             Debug.WriteLine($"{LOG_PREFIX} Symbol selected: '{selected?.Name ?? "none"}'");
             _panel?.UpdateActionButtonsState(selected != null);
             _panel?.SetSelectedSymbolProperties(selected);
+
+            // Load prompt fields từ definition → hiển thị trên DataGrid
+            var fields = ExtractPromptFieldsFromDefinition(selected?.Definition);
+            _panel?.SetPromptFields(fields);
         }
 
         // ─── Private helpers ──────────────────────────────────────────────────
@@ -419,6 +423,64 @@ namespace MCGInventorPlugin.Controllers.SymbolHandler
         {
             try { return def.Sketch?.TextBoxes?.Count ?? 0; }
             catch { return 0; }
+        }
+
+        /// <summary>
+        /// Trích xuất danh sách prompt fields từ definition.
+        /// Chỉ lấy TextBox có chứa Prompt tag (ReadOnlyUniqueID) — bỏ qua TextBox thường.
+        /// </summary>
+        private static List<PromptFieldModel> ExtractPromptFieldsFromDefinition(
+            Inventor.SketchedSymbolDefinition def)
+        {
+            var fields = new List<PromptFieldModel>();
+            if (def == null) return fields;
+
+            try
+            {
+                var sketch = def.Sketch;
+                if (sketch == null) return fields;
+
+                int idx = 0;
+                foreach (TextBox tb in sketch.TextBoxes)
+                {
+                    try
+                    {
+                        string formatted = string.Empty;
+                        try { formatted = tb.FormattedText ?? string.Empty; } catch { }
+
+                        // Chỉ lấy prompt fields (có ReadOnlyUniqueID)
+                        if (formatted.IndexOf("ReadOnlyUniqueID", StringComparison.OrdinalIgnoreCase) < 0)
+                        {
+                            idx++;
+                            continue;
+                        }
+
+                        // Tên field: lấy từ TextBox.Text (default value / label)
+                        string name = tb.Text?.Trim() ?? $"Field_{idx}";
+                        string defaultValue = tb.Text?.Trim() ?? string.Empty;
+
+                        fields.Add(new PromptFieldModel
+                        {
+                            Name         = name,
+                            Value        = defaultValue,
+                            TextBoxIndex = idx
+                        });
+
+                        Debug.WriteLine($"{LOG_PREFIX}   PromptField[{idx}]: name='{name}' default='{defaultValue}'");
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"{LOG_PREFIX}   LỖI đọc TextBox[{idx}]: {ex.Message}");
+                    }
+                    idx++;
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"{LOG_PREFIX} LỖI ExtractPromptFields: {ex.Message}");
+            }
+
+            return fields;
         }
 
         private void DetachPanel()

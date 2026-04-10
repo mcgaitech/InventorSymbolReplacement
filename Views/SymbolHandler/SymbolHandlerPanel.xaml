@@ -363,29 +363,77 @@
                     <CheckBox x:Name="chkClipping" Content="Clipping"
                               FontSize="11" Margin="0,0,14,0"/>
                     <CheckBox x:Name="chkStatic"   Content="Static"
-                              FontSize="11"/>
+                              FontSize="11" IsChecked="True"/>
                 </StackPanel>
 
                 <!-- Checkboxes row 2 -->
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
                     <CheckBox x:Name="chkLeader" Content="Leader"
                               FontSize="11" Margin="0,0,14,0"
+                              IsChecked="True"
                               Checked="ChkLeader_Changed" Unchecked="ChkLeader_Changed"/>
                     <CheckBox x:Name="chkLeaderVisible" Content="Leader Visible"
                               FontSize="11" IsEnabled="False"/>
                 </StackPanel>
 
-                <!-- Preview image -->
-                <Border BorderThickness="1" BorderBrush="#FFB4B4B4"
-                        Background="White" Width="86" Height="86"
-                        HorizontalAlignment="Center">
-                    <Image x:Name="imgPreview"
-                           Width="80" Height="80"
-                           Stretch="Uniform"
-                           RenderOptions.BitmapScalingMode="HighQuality"
-                           HorizontalAlignment="Center"
-                           VerticalAlignment="Center"/>
-                </Border>
+                <!-- Prompt fields (attributes) DataGrid -->
+                <TextBlock Text="ATTRIBUTES"
+                           FontSize="11"
+                           FontWeight="Bold"
+                           Foreground="#FF646464"
+                           Margin="0,0,0,3"/>
+                <DataGrid x:Name="dgPromptFields"
+                          AutoGenerateColumns="False"
+                          CanUserAddRows="False"
+                          CanUserDeleteRows="False"
+                          CanUserReorderColumns="False"
+                          CanUserSortColumns="False"
+                          HeadersVisibility="Column"
+                          GridLinesVisibility="Horizontal"
+                          HorizontalGridLinesBrush="#FFD6D6D6"
+                          BorderBrush="#FFB4B4B4"
+                          BorderThickness="1"
+                          Background="White"
+                          RowBackground="White"
+                          AlternatingRowBackground="#FFF8F8F8"
+                          FontSize="11"
+                          MinHeight="40"
+                          MaxHeight="120"
+                          Margin="0,0,0,6">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Field"
+                                            Binding="{Binding Name}"
+                                            IsReadOnly="True"
+                                            Width="*"
+                                            FontSize="11">
+                            <DataGridTextColumn.ElementStyle>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Foreground" Value="#FF646464"/>
+                                    <Setter Property="Padding" Value="4,2"/>
+                                </Style>
+                            </DataGridTextColumn.ElementStyle>
+                        </DataGridTextColumn>
+                        <DataGridTextColumn Header="Value"
+                                            Binding="{Binding Value, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                            Width="*"
+                                            FontSize="11">
+                            <DataGridTextColumn.ElementStyle>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Foreground" Value="#FF3C3C3C"/>
+                                    <Setter Property="Padding" Value="4,2"/>
+                                </Style>
+                            </DataGridTextColumn.ElementStyle>
+                            <DataGridTextColumn.EditingElementStyle>
+                                <Style TargetType="TextBox">
+                                    <Setter Property="Padding" Value="2,1"/>
+                                    <Setter Property="BorderThickness" Value="0"/>
+                                </Style>
+                            </DataGridTextColumn.EditingElementStyle>
+                        </DataGridTextColumn>
+                    </DataGrid.Columns>
+                </DataGrid>
+
+                <!-- Preview image đã bỏ — thumbnail hiển thị trên symbol list -->
             </StackPanel>
             </ScrollViewer>
         </Border>

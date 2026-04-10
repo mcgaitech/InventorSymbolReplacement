@@ -1,7 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Windows.Forms;
 using Inventor;
+using MCGInventorPlugin.Models.SymbolHandler;
 using MCGInventorPlugin.Services.SymbolHandler;
 using MCGInventorPlugin.Views.SymbolHandler;
 
@@ -29,27 +31,39 @@ namespace MCGInventorPlugin.Controllers.SymbolHandler
         private readonly ISymbolReplaceService   _replaceService;
         private readonly InteractionController   _interactionCtrl;
         private readonly PaletteController       _paletteCtrl;
+        private readonly SelectionListener       _selectionListener;
 
         // ─── State ────────────────────────────────────────────────────────────
         private SymbolHandlerPanel _panel;
+        /// <summary>Symbol instance đang được edit fields (pick từ bản vẽ).</summary>
+        private SketchedSymbol _editingSymbol;
 
         // ─── Constructor ──────────────────────────────────────────────────────
         public ReplaceController(
             Inventor.Application   app,
             ISymbolReplaceService  replaceService,
             InteractionController  interactionCtrl,
-            PaletteController      paletteCtrl)
+            PaletteController      paletteCtrl,
+            SelectionListener      selectionListener = null)
         {
-            _app             = app             ?? throw new ArgumentNullException(nameof(app));
-            _replaceService  = replaceService  ?? throw new ArgumentNullException(nameof(replaceService));
-            _interactionCtrl = interactionCtrl ?? throw new ArgumentNullException(nameof(interactionCtrl));
-            _paletteCtrl     = paletteCtrl     ?? throw new ArgumentNullException(nameof(paletteCtrl));
+            _app               = app             ?? throw new ArgumentNullException(nameof(app));
+            _replaceService    = replaceService  ?? throw new ArgumentNullException(nameof(replaceService));
+            _interactionCtrl   = interactionCtrl ?? throw new ArgumentNullException(nameof(interactionCtrl));
+            _paletteCtrl       = paletteCtrl     ?? throw new ArgumentNullException(nameof(paletteCtrl));
+            _selectionListener = selectionListener;
 
             // Đăng ký event từ InteractionController
             _interactionCtrl.SymbolPicked      += OnSymbolPicked;
             _interactionCtrl.PickModeCancelled += OnPickModeCancelled;
             _interactionCtrl.InsertPointPicked += OnInsertPointPicked;
             _interactionCtrl.InsertModeCancelled += OnInsertModeCancelled;
+
+            // Đăng ký event từ SelectionListener (pick symbol bất kỳ lúc nào)
+            if (_selectionListener != null)
+            {
+                _selectionListener.SymbolSelected    += OnDrawingSymbolSelected;
+                _selectionListener.NonSymbolSelected += OnDrawingNonSymbolSelected;
+            }
 
             Debug.WriteLine($"{LOG_PREFIX} Khởi tạo ReplaceController.");
         }
@@ -79,6 +93,11 @@ namespace MCGInventorPlugin.Controllers.SymbolHandler
             _interactionCtrl.SymbolPicked        -= OnSymbolPicked;
             _interactionCtrl.PickModeCancelled   -= OnPickModeCancelled;
             _interactionCtrl.InsertPointPicked   -= OnInsertPointPicked;
+            if (_selectionListener != null)
+            {
+                _selectionListener.SymbolSelected    -= OnDrawingSymbolSelected;
+                _selectionListener.NonSymbolSelected -= OnDrawingNonSymbolSelected;
+            }
             _interactionCtrl.InsertModeCancelled -= OnInsertModeCancelled;
             _interactionCtrl.Cleanup();
             DetachPanel();
@@ -177,12 +196,35 @@ namespace MCGInventorPlugin.Controllers.SymbolHandler
 
             if (mode == ReplaceAllMode.None)
             {
+                // So sánh prompt fields trước replace
+                int oldFieldCount = CountPromptFields(pickedSymbol.Definition);
+                int newFieldCount = CountPromptFields(newDef);
+                bool fieldsDiffer = oldFieldCount != newFieldCount;
+
                 // Replace single
                 bool ok = _replaceService.ReplaceSingle(pickedSymbol, newDef);
                 if (ok)
-                    _panel?.SetStatusSuccess(1);
+                {
+                    if (fieldsDiffer)
+                        _panel?.SetStatusWarning(
+                            $"1 symbol replaced. Fields differ: old={oldFieldCount}, new={newFieldCount} — default values used for unmatched fields.");
+                    else
+                        _panel?.SetStatusSuccess(1);
+                }
                 else
-                    _panel?.SetStatusError("Replace failed. Check DebugView for details.");
+                {
+                    if (fieldsDiffer)
+                    {
+                        string oldName = "";
+                        try { oldName = pickedSymbol.Definition?.Name ?? ""; } catch { }
+                        string newName = "";
+                        try { newName = newDef.Name ?? ""; } catch { }
+                        _panel?.SetStatusError(
+                            $"Cannot replace: '{oldName}' has {oldFieldCount} field(s), '{newName}' has {newFieldCount} field(s). Fields are incompatible.");
+                    }
+                    else
+                        _panel?.SetStatusError("Replace failed. Check DebugView for details.");
+                }
             }
             else
             {
@@ -252,15 +294,33 @@ namespace MCGInventorPlugin.Controllers.SymbolHandler
                 return;
             }
 
-            // Đọc scale và rotation từ Properties panel
-            double scale    = _panel?.InsertScale       ?? 1.0;
-            double rotation = _panel?.InsertRotationRad ?? 0.0;
+            // Đọc scale, rotation và checkbox options từ Properties panel
+            double scale          = _panel?.InsertScale          ?? 1.0;
+            double rotation       = _panel?.InsertRotationRad    ?? 0.0;
+            bool   isStatic       = _panel?.InsertStatic         ?? false;
+            bool   symbolClipping = _panel?.InsertSymbolClipping ?? false;
+            bool   leaderEnabled  = _panel?.InsertLeaderEnabled  ?? true;
+            bool   leaderVisible  = _panel?.InsertLeaderVisible  ?? true;
 
-            Debug.WriteLine($"{LOG_PREFIX} Insert scale={scale:F3} rotation={rotation:F3}rad");
+            Debug.WriteLine($"{LOG_PREFIX} Insert scale={scale:F3} rotation={rotation:F3}rad" +
+                            $" static={isStatic} clipping={symbolClipping} leader={leaderEnabled} leaderVis={leaderVisible}");
+
+            // Đọc prompt values từ DataGrid (nếu user đã edit)
+            Dictionary<int, string> promptValues = null;
+            var fields = _panel?.GetPromptFields();
+            if (fields != null && fields.Count > 0)
+            {
+                promptValues = new Dictionary<int, string>();
+                foreach (var f in fields)
+                    promptValues[f.TextBoxIndex] = f.Value ?? string.Empty;
+            }
 
             var resolvedDef = ResolveDefinitionInDocument(doc, newDef);
             bool ok = _replaceService.InsertSymbol(sheet, resolvedDef, args.Position,
-                                                   rotation, scale, args.PickedGeometry);
+                                                   rotation, scale, args.PickedGeometry,
+                                                   isStatic, symbolClipping,
+                                                   leaderEnabled, leaderVisible,
+                                                   promptValues);
 
             if (ok)
             {
@@ -308,9 +368,16 @@ namespace MCGInventorPlugin.Controllers.SymbolHandler
                 return;
             }
 
+            bool fieldsDiffer = CountPromptFields(oldDef) != CountPromptFields(newDef);
             int count = _replaceService.ReplaceAllOnSheet(sheet, oldDef, newDef);
             if (count > 0)
-                _panel?.SetStatusSuccess(count);
+            {
+                if (fieldsDiffer)
+                    _panel?.SetStatusWarning(
+                        $"{count} symbol(s) replaced. Fields differ — default values used for unmatched fields.");
+                else
+                    _panel?.SetStatusSuccess(count);
+            }
             else
                 _panel?.SetStatusError("No symbols replaced. Check DebugView.");
         }
@@ -359,9 +426,16 @@ namespace MCGInventorPlugin.Controllers.SymbolHandler
                 return;
             }
 
+            bool fieldsDiffer = CountPromptFields(oldDef) != CountPromptFields(newDef);
             int replaced = _replaceService.ReplaceAllInDocument(doc, oldDef, newDef);
             if (replaced > 0)
-                _panel?.SetStatusSuccess(replaced);
+            {
+                if (fieldsDiffer)
+                    _panel?.SetStatusWarning(
+                        $"{replaced} symbol(s) replaced. Fields differ — default values used for unmatched fields.");
+                else
+                    _panel?.SetStatusSuccess(replaced);
+            }
             else
                 _panel?.SetStatusError("No symbols replaced. Check DebugView.");
         }
@@ -428,6 +502,128 @@ namespace MCGInventorPlugin.Controllers.SymbolHandler
         }
 
         // ─── Nested enum ──────────────────────────────────────────────────────
+        // ─── Event handlers: SelectionListener (edit fields trực tiếp) ────────
+
+        private void OnDrawingNonSymbolSelected(object sender, EventArgs e)
+        {
+            // User chọn đối tượng không phải symbol → clear DataGrid + editing state
+            if (_interactionCtrl.IsActive) return;
+
+            _editingSymbol = null;
+            _panel?.SetPromptFields(null);
+            Debug.WriteLine($"{LOG_PREFIX} Non-symbol selected → cleared fields.");
+        }
+
+        private void OnDrawingSymbolSelected(object sender, SketchedSymbol sym)
+        {
+            if (sym == null) return;
+
+            // Không xử lý nếu đang trong pick/insert mode (InteractionController đang active)
+            if (_interactionCtrl.IsActive) return;
+
+            Debug.WriteLine($"{LOG_PREFIX} Drawing symbol selected: '{sym.Name}' → load fields.");
+
+            _editingSymbol = sym;
+
+            // Trích xuất prompt fields từ instance (actual values)
+            var fields = ExtractPromptFieldsFromInstance(sym);
+            _panel?.SetPromptFields(fields);
+
+            // Đăng ký PropertyChanged trên mỗi field → realtime update
+            foreach (var f in fields)
+            {
+                f.PropertyChanged += (s, e) =>
+                {
+                    if (e.PropertyName == nameof(PromptFieldModel.Value) && _editingSymbol != null)
+                    {
+                        var field = (PromptFieldModel)s;
+                        Debug.WriteLine($"{LOG_PREFIX} Realtime update: TB[{field.TextBoxIndex}] = '{field.Value}'");
+                        _replaceService.UpdatePromptText(_editingSymbol, field.TextBoxIndex, field.Value);
+                    }
+                };
+            }
+
+            // Hiển thị tên symbol trên status bar
+            _panel?.SetStatusInfo($"Editing fields: '{sym.Name}' ({fields.Count} field(s))");
+        }
+
+        /// <summary>
+        /// Trích xuất prompt fields từ symbol instance (actual values trên bản vẽ).
+        /// Dùng GetResultText() thay vì default value từ definition.
+        /// </summary>
+        private static List<PromptFieldModel> ExtractPromptFieldsFromInstance(SketchedSymbol symbol)
+        {
+            var fields = new List<PromptFieldModel>();
+            if (symbol == null) return fields;
+
+            try
+            {
+                var sketch = symbol.Definition?.Sketch;
+                if (sketch == null) return fields;
+
+                int idx = 0;
+                foreach (Inventor.TextBox tb in sketch.TextBoxes)
+                {
+                    try
+                    {
+                        string formatted = string.Empty;
+                        try { formatted = tb.FormattedText ?? string.Empty; } catch { }
+
+                        // Chỉ lấy prompt fields (có ReadOnlyUniqueID)
+                        if (formatted.IndexOf("ReadOnlyUniqueID", StringComparison.OrdinalIgnoreCase) < 0)
+                        {
+                            idx++;
+                            continue;
+                        }
+
+                        string name = tb.Text?.Trim() ?? $"Field_{idx}";
+                        // Đọc actual value từ instance
+                        string actualValue = string.Empty;
+                        try { actualValue = symbol.GetResultText(tb) ?? string.Empty; } catch { }
+
+                        fields.Add(new PromptFieldModel
+                        {
+                            Name         = name,
+                            Value        = actualValue,
+                            TextBoxIndex = idx
+                        });
+                    }
+                    catch { }
+                    idx++;
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[ReplaceController] LỖI ExtractPromptFieldsFromInstance: {ex.Message}");
+            }
+
+            return fields;
+        }
+
+        /// <summary>Đếm số prompt fields (TextBox có ReadOnlyUniqueID) trong definition.</summary>
+        private static int CountPromptFields(SketchedSymbolDefinition def)
+        {
+            if (def == null) return 0;
+            try
+            {
+                int count = 0;
+                var sketch = def.Sketch;
+                if (sketch == null) return 0;
+                foreach (Inventor.TextBox tb in sketch.TextBoxes)
+                {
+                    try
+                    {
+                        string fmt = tb.FormattedText ?? string.Empty;
+                        if (fmt.IndexOf("ReadOnlyUniqueID", StringComparison.OrdinalIgnoreCase) >= 0)
+                            count++;
+                    }
+                    catch { }
+                }
+                return count;
+            }
+            catch { return 0; }
+        }
+
         private enum ReplaceAllMode { None, CurrentSheet, AllSheets }
     }
 }

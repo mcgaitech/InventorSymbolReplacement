@@ -7,6 +7,8 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using MCGInventorPlugin.Models.SymbolHandler;
 
 namespace MCGInventorPlugin.Views.SymbolHandler
@@ -89,6 +91,18 @@ namespace MCGInventorPlugin.Views.SymbolHandler
                 return 0.0;
             }
         }
+
+        /// <summary>Static = true → ẩn grip points (scale + rotate), chỉ giữ insertion point.</summary>
+        public bool InsertStatic => chkStatic?.IsChecked == true;
+
+        /// <summary>SymbolClipping = true → trim annotations bên ngoài khi đè lên symbol.</summary>
+        public bool InsertSymbolClipping => chkClipping?.IsChecked == true;
+
+        /// <summary>Có tạo leader khi insert hay không.</summary>
+        public bool InsertLeaderEnabled => chkLeader?.IsChecked == true;
+
+        /// <summary>Leader có hiện hay ẩn (chỉ có ý nghĩa khi InsertLeaderEnabled = true).</summary>
+        public bool InsertLeaderVisible => chkLeaderVisible?.IsChecked == true;
 
         // ─── Constructor ──────────────────────────────────────────────────────
 
@@ -296,13 +310,9 @@ namespace MCGInventorPlugin.Views.SymbolHandler
                 if (model == null)
                 {
                     txtSymbolName.Text = "(select a symbol)";
-                    imgPreview.Source  = null;
                     return;
                 }
                 txtSymbolName.Text = model.Name;
-                imgPreview.Source  = model.Thumbnail != null
-                    ? WpfSymbolGrid.ConvertBitmapToSource(model.Thumbnail)
-                    : null;
             });
         }
 
@@ -545,6 +555,33 @@ namespace MCGInventorPlugin.Views.SymbolHandler
         {
             if (chkLeaderVisible != null)
                 chkLeaderVisible.IsEnabled = chkLeader.IsChecked == true;
+        }
+
+        // ─── Prompt fields (attributes) DataGrid ──────────────────────────────
+
+        private ObservableCollection<PromptFieldModel> _promptFields
+            = new ObservableCollection<PromptFieldModel>();
+
+        /// <summary>Cập nhật DataGrid với danh sách prompt fields. Gọi khi chọn symbol trên palette hoặc pick trên bản vẽ.</summary>
+        public void SetPromptFields(List<PromptFieldModel> fields)
+        {
+            Dispatcher.Invoke(() =>
+            {
+                _promptFields.Clear();
+                if (fields != null)
+                {
+                    foreach (var f in fields)
+                        _promptFields.Add(f);
+                }
+                dgPromptFields.ItemsSource = _promptFields;
+                Debug.WriteLine($"{LOG_PREFIX} SetPromptFields: {_promptFields.Count} fields.");
+            });
+        }
+
+        /// <summary>Lấy danh sách prompt fields hiện tại (sau khi user đã edit).</summary>
+        public List<PromptFieldModel> GetPromptFields()
+        {
+            return new List<PromptFieldModel>(_promptFields);
         }
     }
 }

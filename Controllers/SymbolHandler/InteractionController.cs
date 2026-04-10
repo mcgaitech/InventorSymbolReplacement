@@ -331,6 +331,96 @@ namespace MCGInventorPlugin.Controllers.SymbolHandler
     }
 
     /// <summary>
+    /// Listen UserInputEvents.OnSelect để phát hiện khi user click chọn
+    /// SketchedSymbol trên bản vẽ bất kỳ lúc nào (không cần enter pick mode).
+    /// Dùng cho tính năng Edit Fields trực tiếp từ palette.
+    /// </summary>
+    public class SelectionListener
+    {
+        private const string LOG_PREFIX = "[SelectionListener]";
+
+        private readonly Inventor.Application _app;
+        private UserInputEvents _userInputEvents;
+        private bool _listening;
+
+        /// <summary>Raised khi user click chọn 1 SketchedSymbol trên bản vẽ (ngoài pick mode).</summary>
+        public event EventHandler<SketchedSymbol> SymbolSelected;
+
+        /// <summary>Raised khi user click đối tượng không phải SketchedSymbol → clear fields.</summary>
+        public event EventHandler NonSymbolSelected;
+
+        public SelectionListener(Inventor.Application app)
+        {
+            _app = app ?? throw new ArgumentNullException(nameof(app));
+        }
+
+        /// <summary>Bắt đầu listen. Gọi sau khi addin activate.</summary>
+        public void Start()
+        {
+            if (_listening) return;
+            try
+            {
+                _userInputEvents = _app.CommandManager.UserInputEvents;
+                _userInputEvents.OnSelect += OnUserSelect;
+                _listening = true;
+                Debug.WriteLine($"{LOG_PREFIX} Started listening UserInputEvents.OnSelect.");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"{LOG_PREFIX} LỖI Start: {ex.Message}");
+            }
+        }
+
+        /// <summary>Dừng listen. Gọi khi cleanup.</summary>
+        public void Stop()
+        {
+            if (!_listening) return;
+            try
+            {
+                if (_userInputEvents != null)
+                {
+                    _userInputEvents.OnSelect -= OnUserSelect;
+                    _userInputEvents = null;
+                }
+                _listening = false;
+                Debug.WriteLine($"{LOG_PREFIX} Stopped listening.");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"{LOG_PREFIX} LỖI Stop: {ex.Message}");
+            }
+        }
+
+        private void OnUserSelect(
+            ObjectsEnumerator justSelectedEntities,
+            ref ObjectCollection moreSelectedEntities,
+            SelectionDeviceEnum selectionDevice,
+            Point modelPosition,
+            Point2d viewPosition,
+            Inventor.View view)
+        {
+            try
+            {
+                foreach (var entity in justSelectedEntities)
+                {
+                    if (entity is SketchedSymbol sym)
+                    {
+                        Debug.WriteLine($"{LOG_PREFIX} User selected SketchedSymbol: '{sym.Name}'");
+                        SymbolSelected?.Invoke(this, sym);
+                        return;
+                    }
+                }
+                // Không tìm thấy SketchedSymbol → clear
+                NonSymbolSelected?.Invoke(this, EventArgs.Empty);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"{LOG_PREFIX} LỖI OnUserSelect: {ex.Message}");
+            }
+        }
+    }
+
+    /// <summary>
     /// Event args cho Insert mode — mang cả vị trí pick và geometry entity để tạo leader.
     /// </summary>
     public class InsertPickEventArgs : EventArgs

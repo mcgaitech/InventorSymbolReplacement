@@ -33,7 +33,24 @@ namespace MCGInventorPlugin.Services.SymbolHandler
         /// Nếu attachGeometry != null → tạo leader bám vào geometry đó.
         /// Tạo 1 Transaction → 1 Undo step.
         /// </summary>
+        /// <param name="isStatic">true → ẩn grip points (scale/rotate), chỉ giữ insertion point.</param>
+        /// <param name="symbolClipping">true → trim annotations bên ngoài khi đè lên symbol.</param>
+        /// <param name="leaderEnabled">true → tạo leader bám vào geometry (nếu có).</param>
+        /// <param name="leaderVisible">true → hiện leader line. Chỉ có ý nghĩa khi leaderEnabled = true.</param>
         bool InsertSymbol(Sheet sheet, SketchedSymbolDefinition definition, Point2d position,
-                          double rotation = 0.0, double scale = 1.0, object attachGeometry = null);
+                          double rotation = 0.0, double scale = 1.0, object attachGeometry = null,
+                          bool isStatic = false, bool symbolClipping = false,
+                          bool leaderEnabled = true, bool leaderVisible = true,
+                          System.Collections.Generic.Dictionary<int, string> promptValues = null);
+
+        /// <summary>
+        /// Cập nhật prompt text (field values) trực tiếp trên symbol instance đang có trên bản vẽ.
+        /// Dùng SetPromptResultText() — không cần delete/re-insert.
+        /// Bọc trong 1 Transaction → 1 Undo step.
+        /// </summary>
+        /// <param name="symbol">Instance trên bản vẽ cần update.</param>
+        /// <param name="textBoxIndex">Index của TextBox trong definition.</param>
+        /// <param name="value">Giá trị mới.</param>
+        bool UpdatePromptText(SketchedSymbol symbol, int textBoxIndex, string value);
     }
 }

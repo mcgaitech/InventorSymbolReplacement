@@ -30,6 +30,7 @@ namespace MCGInventorPlugin.Modules
         private PaletteController     _paletteController;
         private InteractionController _interactionController;
         private ReplaceController     _replaceController;
+        private SelectionListener     _selectionListener;
 
         private bool _uiCreated = false;
 
@@ -45,7 +46,8 @@ namespace MCGInventorPlugin.Modules
             _ribbonController      = new RibbonController(app);
             _paletteController     = new PaletteController(app, _libraryService, _thumbnailService, _configService);
             _interactionController = new InteractionController(app);
-            _replaceController     = new ReplaceController(app, _symbolReplaceService, _interactionController, _paletteController);
+            _selectionListener     = new SelectionListener(app);
+            _replaceController     = new ReplaceController(app, _symbolReplaceService, _interactionController, _paletteController, _selectionListener);
 
             Debug.WriteLine($"{LOG_PREFIX} Services + Controllers khởi tạo.");
         }
@@ -60,6 +62,7 @@ namespace MCGInventorPlugin.Modules
                 _paletteController.SetPanel(_ribbonController.Panel);
                 _paletteController.Initialize();
                 _replaceController.SetPanel(_ribbonController.Panel);
+                _selectionListener.Start();
                 _uiCreated = true;
                 Debug.WriteLine($"{LOG_PREFIX} Ribbon UI + Panel wiring THÀNH CÔNG.");
             }
@@ -79,12 +82,14 @@ namespace MCGInventorPlugin.Modules
 
             // Controllers cleanup — thứ tự ngược với Activate (LIFO)
             try { _replaceController?.Cleanup(); }      catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI ReplaceController: {ex.Message}"); }
+            try { _selectionListener?.Stop(); }          catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI SelectionListener: {ex.Message}"); }
             try { _interactionController?.Cleanup(); }   catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI InteractionController: {ex.Message}"); }
             try { _paletteController?.Cleanup(); }       catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI PaletteController: {ex.Message}"); }
             try { _ribbonController?.Cleanup(); }        catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI RibbonController: {ex.Message}"); }
 
             // Giải phóng references — Services không có Cleanup() riêng nhưng cần null hóa
             _replaceController     = null;
+            _selectionListener     = null;
             _interactionController = null;
             _paletteController     = null;
             _ribbonController      = null;

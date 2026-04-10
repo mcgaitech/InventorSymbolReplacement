@@ -1,6 +1,11 @@
 {
   "permissions": {
     "allow": [
+      "Bash(taskkill:*)",
+      "Bash(tasklist:*)",
+      "Bash(start:*)",
+      "Bash(cmd.exe:*)",
+      "Bash(\"C:/Program Files/dotnet/dotnet.exe\":*)",
       "Bash(dotnet build:*)",
       "Bash(Get-ChildItem \"C:\\\\Program Files\\\\Autodesk\" -Recurse -Filter \"Autodesk.Inventor.Interop.dll\")",
       "Bash(Select-Object FullName)",

@@ -61,10 +61,12 @@ namespace MCGInventorPlugin.Controllers.SymbolHandler
         private ButtonDefinition              _buttonDef;
         private DockableWindow                _dockableWindow;
         private DockableWindowsEvents         _dockableWindowsEvents;
+        private ApplicationEvents             _appEvents;         // Theo dõi đổi document → ẩn/hiện palette
         private HwndSource                    _hwndSource;        // WPF host window nhúng vào DockableWindow
         private DockWindowSizer               _dockWindowSizer;   // NativeWindow bắt WM_SIZE
         private SymbolHandlerPanel           _panel;             // WPF UserControl
         private System.Windows.Forms.Timer    _embedRetryTimer;   // Retry khi DockableWindow.HWND=0 ở kAfter
+        private bool                          _wasVisibleBeforeSwitch; // Nhớ trạng thái palette trước khi ẩn
 
         // ─── Constructor ──────────────────────────────────────────────────────
         public RibbonController(Inventor.Application app)
@@ -105,6 +107,15 @@ namespace MCGInventorPlugin.Controllers.SymbolHandler
 
                 // Force ẩn palette khi khởi động — Inventor có thể restore Visible=true từ session trước
                 try { if (_dockableWindow != null) _dockableWindow.Visible = false; } catch { }
+
+                // Subscribe OnActivateDocument — ẩn palette khi chuyển sang Part/Assembly
+                try
+                {
+                    _appEvents = _app.ApplicationEvents;
+                    _appEvents.OnActivateDocument += OnActivateDocument;
+                    Debug.WriteLine($"{LOG_PREFIX} OnActivateDocument subscribed.");
+                }
+                catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI subscribe OnActivateDocument: {ex.Message}"); }
 
                 Debug.WriteLine($"{LOG_PREFIX} Ribbon UI tạo THÀNH CÔNG.");
             }
@@ -164,6 +175,16 @@ namespace MCGInventorPlugin.Controllers.SymbolHandler
                     _buttonDef.OnExecute -= OnSymbolHandlerButtonExecute;
             }
             catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI detach button: {ex.Message}"); }
+
+            try
+            {
+                if (_appEvents != null)
+                {
+                    _appEvents.OnActivateDocument -= OnActivateDocument;
+                    _appEvents = null;
+                }
+            }
+            catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI detach AppEvents: {ex.Message}"); }
 
             try
             {
@@ -611,6 +632,36 @@ namespace MCGInventorPlugin.Controllers.SymbolHandler
             _buttonDef.Pressed = newVisibility;
 
             Debug.WriteLine($"{LOG_PREFIX} DockableWindow.Visible = {newVisibility}");
+        }
+
+        /// <summary>
+        /// Gọi khi user chuyển document — ẩn palette nếu không phải Drawing, hiện lại nếu Drawing.
+        /// </summary>
+        private void OnActivateDocument(_Document documentObject, EventTimingEnum beforeOrAfter,
+                                         NameValueMap context, out HandlingCodeEnum handlingCode)
+        {
+            handlingCode = HandlingCodeEnum.kEventNotHandled;
+            if (beforeOrAfter != EventTimingEnum.kAfter) return;
+            if (_dockableWindow == null) return;
+
+            bool isDrawing = documentObject is DrawingDocument;
+
+            if (!isDrawing && _dockableWindow.Visible)
+            {
+                // Chuyển sang Part/Assembly — nhớ trạng thái và ẩn palette
+                _wasVisibleBeforeSwitch = true;
+                _dockableWindow.Visible = false;
+                _buttonDef.Pressed = false;
+                Debug.WriteLine($"{LOG_PREFIX} OnActivateDocument: không phải Drawing → ẩn palette.");
+            }
+            else if (isDrawing && _wasVisibleBeforeSwitch)
+            {
+                // Quay lại Drawing — show lại palette nếu trước đó đang mở
+                _wasVisibleBeforeSwitch = false;
+                _dockableWindow.Visible = true;
+                _buttonDef.Pressed = true;
+                Debug.WriteLine($"{LOG_PREFIX} OnActivateDocument: Drawing → hiện lại palette.");
+            }
         }
 
         /// <summary>

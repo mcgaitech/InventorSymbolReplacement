@@ -174,7 +174,10 @@ namespace MCGInventorPlugin.Services.SymbolHandler
         }
 
         public bool InsertSymbol(Sheet sheet, SketchedSymbolDefinition definition, Point2d position,
-                                 double rotation = 0.0, double scale = 1.0, object attachGeometry = null)
+                                 double rotation = 0.0, double scale = 1.0, object attachGeometry = null,
+                                 bool isStatic = false, bool symbolClipping = false,
+                                 bool leaderEnabled = true, bool leaderVisible = true,
+                                 Dictionary<int, string> promptValues = null)
         {
             if (sheet      == null) throw new ArgumentNullException(nameof(sheet));
             if (definition == null) throw new ArgumentNullException(nameof(definition));
@@ -193,7 +196,31 @@ namespace MCGInventorPlugin.Services.SymbolHandler
             // Resolve definition trong active document (tránh cross-doc reference)
             var resolvedDef = ResolveDefinitionInDocument(doc, definition);
 
-            var promptStrings = BuildPromptStrings(resolvedDef);
+            // Nếu có promptValues từ DataGrid → convert sang snapshot format cho BuildPromptStrings
+            Dictionary<string, string> insertSnapshot = null;
+            if (promptValues != null && promptValues.Count > 0)
+            {
+                insertSnapshot = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                try
+                {
+                    int tbIdx = 0;
+                    foreach (TextBox tb in resolvedDef.Sketch.TextBoxes)
+                    {
+                        if (promptValues.TryGetValue(tbIdx, out string val))
+                        {
+                            string key = $"tb_{tbIdx}_{(tb.Text?.Trim() ?? string.Empty)}";
+                            insertSnapshot[key] = val;
+                            Debug.WriteLine($"{LOG_PREFIX}   PromptValue override: TB[{tbIdx}] = '{val}'");
+                        }
+                        tbIdx++;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"{LOG_PREFIX}   LỖI build insertSnapshot: {ex.Message}");
+                }
+            }
+            var promptStrings = BuildPromptStrings(resolvedDef, insertSnapshot);
 
             var tx = _app.TransactionManager.StartTransaction((_Document)doc, "Insert Symbol");
             try
@@ -201,28 +228,44 @@ namespace MCGInventorPlugin.Services.SymbolHandler
                 var newSym = sheet.SketchedSymbols.Add(resolvedDef, position, rotation, scale, promptStrings);
                 Debug.WriteLine($"{LOG_PREFIX}   Add() THÀNH CÔNG: '{newSym.Name}'");
 
-                // Tìm geometry để attach leader:
-                //   - attachGeometry != null → dùng trực tiếp (từ SelectEvents)
-                //   - attachGeometry == null → tự tìm DrawingCurve gần nhất (MouseEvents + snap)
-                //     Nếu tìm được curve gần (< 0.5cm) → attached; không → floating
-                object geoToAttach = attachGeometry;
-                if (geoToAttach == null)
+                // Set Static — ẩn/hiện grip points (scale + rotate)
+                try { newSym.Static = isStatic; }
+                catch (Exception exS) { Debug.WriteLine($"{LOG_PREFIX}   CẢNH BÁO: Không set Static: {exS.Message}"); }
+
+                // Set SymbolClipping — trim annotations bên ngoài
+                try { newSym.SymbolClipping = symbolClipping; }
+                catch (Exception exC) { Debug.WriteLine($"{LOG_PREFIX}   CẢNH BÁO: Không set SymbolClipping: {exC.Message}"); }
+
+                // Leader: chỉ tạo khi leaderEnabled = true
+                if (leaderEnabled)
                 {
-                    var nearestCurve = FindNearestDrawingCurve(sheet, position);
-                    if (nearestCurve != null)
+                    // Tìm geometry để attach leader:
+                    //   - attachGeometry != null → dùng trực tiếp (từ SelectEvents)
+                    //   - attachGeometry == null → tự tìm DrawingCurve gần nhất (MouseEvents + snap)
+                    //     Nếu tìm được curve gần (< 0.5cm) → attached; không → floating
+                    object geoToAttach = attachGeometry;
+                    if (geoToAttach == null)
                     {
-                        geoToAttach = nearestCurve;
-                        Debug.WriteLine($"{LOG_PREFIX}   Auto-resolved DrawingCurve gần snap position.");
+                        var nearestCurve = FindNearestDrawingCurve(sheet, position);
+                        if (nearestCurve != null)
+                        {
+                            geoToAttach = nearestCurve;
+                            Debug.WriteLine($"{LOG_PREFIX}   Auto-resolved DrawingCurve gần snap position.");
+                        }
+                        else
+                        {
+                            Debug.WriteLine($"{LOG_PREFIX}   Không tìm được geometry gần → floating insert.");
+                        }
                     }
-                    else
+
+                    if (geoToAttach != null)
                     {
-                        Debug.WriteLine($"{LOG_PREFIX}   Không tìm được geometry gần → floating insert.");
+                        AttachLeaderToGeometry(newSym, sheet, geoToAttach, position, leaderVisible);
                     }
                 }
-
-                if (geoToAttach != null)
+                else
                 {
-                    AttachLeaderToGeometry(newSym, sheet, geoToAttach, position);
+                    Debug.WriteLine($"{LOG_PREFIX}   Leader disabled → floating insert (không tạo leader).");
                 }
 
                 tx.End();
@@ -232,6 +275,58 @@ namespace MCGInventorPlugin.Services.SymbolHandler
             catch (Exception ex)
             {
                 Debug.WriteLine($"{LOG_PREFIX} LỖI InsertSymbol: {ex.Message}");
+                try { tx.Abort(); } catch { }
+                return false;
+            }
+        }
+
+        // ─── Update prompt text (edit fields trực tiếp) ──────────────────────
+
+        public bool UpdatePromptText(SketchedSymbol symbol, int textBoxIndex, string value)
+        {
+            if (symbol == null) throw new ArgumentNullException(nameof(symbol));
+
+            Debug.WriteLine($"{LOG_PREFIX} UpdatePromptText: '{symbol.Name}' TB[{textBoxIndex}] = '{value}'");
+
+            var sheet = GetSheetFromSymbol(symbol);
+            var doc = sheet?.Parent as DrawingDocument;
+            if (doc == null)
+            {
+                Debug.WriteLine($"{LOG_PREFIX} LỖI: Không lấy được DrawingDocument.");
+                return false;
+            }
+
+            var tx = _app.TransactionManager.StartTransaction((_Document)doc, "Edit Field Text");
+            try
+            {
+                var sketch = symbol.Definition?.Sketch;
+                if (sketch == null)
+                {
+                    Debug.WriteLine($"{LOG_PREFIX} LỖI: Definition không có Sketch.");
+                    tx.Abort();
+                    return false;
+                }
+
+                int idx = 0;
+                foreach (TextBox tb in sketch.TextBoxes)
+                {
+                    if (idx == textBoxIndex)
+                    {
+                        symbol.SetPromptResultText(tb, value ?? string.Empty);
+                        Debug.WriteLine($"{LOG_PREFIX}   SetPromptResultText TB[{idx}] = '{value}' → OK.");
+                        tx.End();
+                        return true;
+                    }
+                    idx++;
+                }
+
+                Debug.WriteLine($"{LOG_PREFIX}   CẢNH BÁO: TextBox index {textBoxIndex} không tìm thấy.");
+                tx.Abort();
+                return false;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"{LOG_PREFIX} LỖI UpdatePromptText: {ex.Message}");
                 try { tx.Abort(); } catch { }
                 return false;
             }
@@ -263,7 +358,8 @@ namespace MCGInventorPlugin.Services.SymbolHandler
         /// Nếu tất cả fail → symbol giữ nguyên floating, log cảnh báo.
         /// </summary>
         private void AttachLeaderToGeometry(SketchedSymbol newSym, Sheet sheet,
-                                             object geometry, Point2d position)
+                                             object geometry, Point2d position,
+                                             bool leaderVisible = true)
         {
             string geoType = "<unknown>";
             try { geoType = geometry.GetType().Name; } catch { }
@@ -347,7 +443,7 @@ namespace MCGInventorPlugin.Services.SymbolHandler
             // AddLeader: [Point2d, GeometryIntent] — probe xác nhận
             // Retry logic: thử geometry trực tiếp → nếu fail, thử .Parent
             // (COM __ComObject không cast được bằng 'is' → phải thử runtime)
-            if (!TryAddLeader(newSym, sheet, resolvedGeo, position))
+            if (!TryAddLeader(newSym, sheet, resolvedGeo, position, leaderVisible))
             {
                 // Lần 2: thử .Parent (DrawingCurveSegment.Parent = DrawingCurve)
                 object parentGeo = null;
@@ -361,7 +457,7 @@ namespace MCGInventorPlugin.Services.SymbolHandler
                 if (parentGeo != null)
                 {
                     Debug.WriteLine($"{LOG_PREFIX}   Retry với Parent geometry...");
-                    TryAddLeader(newSym, sheet, parentGeo, position);
+                    TryAddLeader(newSym, sheet, parentGeo, position, leaderVisible);
                 }
                 else
                 {
@@ -447,7 +543,8 @@ namespace MCGInventorPlugin.Services.SymbolHandler
         /// Thử tạo GeometryIntent + AddLeader cho 1 geometry cụ thể.
         /// Trả về true nếu thành công, false nếu fail (caller sẽ retry với geometry khác).
         /// </summary>
-        private bool TryAddLeader(SketchedSymbol newSym, Sheet sheet, object geo, Point2d position)
+        private bool TryAddLeader(SketchedSymbol newSym, Sheet sheet, object geo, Point2d position,
+                                  bool leaderVisible = true)
         {
             GeometryIntent gi = null;
             try
@@ -474,10 +571,9 @@ namespace MCGInventorPlugin.Services.SymbolHandler
                 // Reset Position về đúng vị trí pick (AddLeader có thể dời symbol)
                 newSym.Position = position;
 
-                // Set leader properties
-                try { newSym.LeaderVisible  = true;  } catch { }
-                try { newSym.LeaderClipping = true;  } catch { }
-                try { newSym.SymbolClipping = false;  } catch { }
+                // Set leader properties — dùng param thay hardcode
+                try { newSym.LeaderVisible  = leaderVisible; } catch { }
+                try { newSym.LeaderClipping = true;          } catch { }
                 // Filled solid đen giống dimension arrows
                 try { newSym.Leader.ArrowheadType = ArrowheadTypeEnum.kFilledArrowheadType; } catch { }
 
@@ -542,7 +638,8 @@ namespace MCGInventorPlugin.Services.SymbolHandler
         ///   - AddLeader([GeometryIntent]) đơn lẻ → E_FAIL.
         ///   - symbol._AttachedEntity = value → "Value does not fall within the expected range".
         /// </summary>
-        private void RestoreLeader(SketchedSymbol newSym, LeaderSnapshot snap, Sheet sheet)
+        private void RestoreLeader(SketchedSymbol newSym, LeaderSnapshot snap, Sheet sheet,
+                                   bool leaderVisible = true)
         {
             if (!snap.HasLeader || snap.Leaves == null || snap.Leaves.Length == 0) return;
 
@@ -561,10 +658,9 @@ namespace MCGInventorPlugin.Services.SymbolHandler
 
                     newSym.Leader.AddLeader(pts);
 
-                    // Set leader properties giống native symbol
-                    try { newSym.LeaderVisible  = true;  } catch { }
-                    try { newSym.LeaderClipping = true;  } catch { }
-                    try { newSym.SymbolClipping = false;  } catch { }
+                    // Set leader properties — restore từ symbol cũ
+                    try { newSym.LeaderVisible  = leaderVisible; } catch { }
+                    try { newSym.LeaderClipping = true;          } catch { }
 
                     Debug.WriteLine($"{LOG_PREFIX}   RestoreLeader: leaf ({leaf.PosX:F3},{leaf.PosY:F3}) → THÀNH CÔNG. HasRootNode={newSym.Leader.HasRootNode}");
                 }
@@ -597,9 +693,15 @@ namespace MCGInventorPlugin.Services.SymbolHandler
             //   - Cơ chế đúng: Leader.AllLeafNodes[i].AttachedEntity + AddLeader([Point2d, GeometryIntent])
             var leaderSnap = SnapshotLeader(old);
 
-            // Bước 1b: Static flag
+            // Bước 1b: Static, SymbolClipping, LeaderVisible flags
             bool isStatic = false;
             try { isStatic = old.Static; } catch { }
+
+            bool oldSymbolClipping = false;
+            try { oldSymbolClipping = old.SymbolClipping; } catch { }
+
+            bool oldLeaderVisible = true;
+            try { oldLeaderVisible = old.LeaderVisible; } catch { }
 
             // Bước 1c: Snapshot prompt text trước khi xóa
             var attrSnapshot = SnapshotPromptText(old);
@@ -626,16 +728,21 @@ namespace MCGInventorPlugin.Services.SymbolHandler
                 resolvedDef, freshPos, rot, scale, promptStrings);
             Debug.WriteLine($"{LOG_PREFIX}   Inserted: '{newSym.Name}'.");
 
-            // ── Bước 6: Restore Static ──
+            // ── Bước 6: Restore Static + SymbolClipping ──
             try { newSym.Static = isStatic; }
             catch (Exception ex)
             {
                 Debug.WriteLine($"{LOG_PREFIX}   CẢNH BÁO: Không restore Static: {ex.Message}");
             }
+            try { newSym.SymbolClipping = oldSymbolClipping; }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"{LOG_PREFIX}   CẢNH BÁO: Không restore SymbolClipping: {ex.Message}");
+            }
 
             // ── Bước 7: Restore Leader (attachment + visual leader line) ──
             // Dùng AddLeader([Point2d, GeometryIntent]) thay vì _AttachedEntity setter.
-            RestoreLeader(newSym, leaderSnap, sheet);
+            RestoreLeader(newSym, leaderSnap, sheet, oldLeaderVisible);
 
             // ── Bước 7a: Reset Position sau AddLeader ──
             // AddLeader() dời symbol body (ROOT) về vị trí leaf → insertion point bị lệch.
@@ -737,9 +844,12 @@ namespace MCGInventorPlugin.Services.SymbolHandler
                         }
 
                         // Lấy value từ snapshot (replace), hoặc default text từ TextBox.Text
+                        // BUG FIX: TryGetValue(out) ghi đè value = null khi key không tồn tại
+                        //          → phải check return trước khi ghi đè
                         string snapshotKey = $"tb_{tbIdx}_{(tb.Text?.Trim() ?? string.Empty)}";
                         string value       = tb.Text ?? string.Empty;
-                        snapshot?.TryGetValue(snapshotKey, out value);
+                        if (snapshot != null && snapshot.TryGetValue(snapshotKey, out string snapVal))
+                            value = snapVal ?? string.Empty;
 
                         values.Add(value ?? string.Empty);
                         Debug.WriteLine($"{LOG_PREFIX}   TB[{tbIdx}] promptUID='{uid}' value='{value}'.");
