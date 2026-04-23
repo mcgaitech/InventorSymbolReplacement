@@ -106,7 +106,7 @@ echo   %TEST_FILE%
 echo.
 echo   - Doi khoang 20-30 giay de Inventor load xong
 echo   - Kiem tra Add-In Manager: add-in co hien khong?
-echo   - Kiem tra Ribbon: tab "Custom Tools" co xuat hien?
+echo   - Kiem tra Ribbon: tab "MCG TOOLS" co xuat hien?
 echo   - Mo DebugView de xem log realtime
 echo.
 echo   == SAU KHI TEST XONG ==

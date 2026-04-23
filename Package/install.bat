@@ -64,7 +64,7 @@ echo.
 echo ════════════════════════════════════════════════════════════════
 echo   CAI DAT THANH CONG!
 echo.
-echo   Mo Inventor -^> Drawing -^> Tab "Custom Tools" -^> Symbol Handler
+echo   Mo Inventor -^> Drawing -^> Tab "MCG TOOLS" -^> Symbol Handler
 echo ════════════════════════════════════════════════════════════════
 echo.
 pause

@@ -31,6 +31,18 @@ Trạng thái:
   [x] Helpers/ → Utilities/ — OK
   [x] Tools/ folder (deploy.bat, resart.bat) — OK
   [x] Xóa files không dùng (Register-Addin.reg, SymbolHandler_Test.csproj) — OK
+  [x] Checkbox Static/Clipping/Leader/LeaderVisible wire vào Insert — OK
+  [x] Attribute DataGrid hiển thị prompt fields từ palette — OK
+  [x] Insert dùng custom prompt values từ DataGrid — OK
+  [x] Pick symbol trên bản vẽ → hiện attributes + edit realtime — OK
+  [x] Non-symbol selected → clear DataGrid — OK
+  [x] Fix bug TryGetValue trong BuildPromptStrings (out ghi đè default) — OK
+  [x] Cảnh báo field count khác nhau khi Replace — OK
+  [x] Default tick Static/Leader/LeaderVisible — OK
+  [x] Force hide palette on startup (chỉ hiện khi click button) — OK
+  [x] Bỏ preview image thừa trong Properties panel — OK
+  [x] Refactor ribbon → portable Core/ SDK (namespace MCG.Inventor.Ribbon) — OK
+  [x] Tab "MCG TOOLS" + 3 panels (Model/Drawing/Utility) + multi-addin share tab — OK
   [ ] Snap point (endpoint, midpoint, intersection) — CHƯA
 ```
 
@@ -62,6 +74,105 @@ Hướng tiếp theo:
 
 Dev cycle: tự động đóng/mở Inventor (không hỏi user — xem memory feedback_auto_deploy.md)
 ```
+
+---
+### Session: 2026-04-23 — Ribbon SDK portable refactor + Tab MCG TOOLS
+
+**Ngày**: 2026-04-23
+
+**Tóm tắt**: Tách toàn bộ logic tạo ribbon tab/panel/button/dockable thành SDK portable trong `Core/` — copy folder này sang addin Inventor khác để tool của addin đó hiện chung tab "MCG TOOLS".
+
+**Kiến trúc mới — `Core/` folder (namespace `MCG.Inventor.Ribbon`):**
+
+| File | Mục đích |
+|------|---------|
+| `PanelLocation.cs` | enum Model / Drawing / Utility |
+| `RibbonContext.cs` | [Flags] enum Part / Assembly / Drawing (multi-ribbon per tool) |
+| `IToolDescriptor.cs` | interface mô tả tool (Id/DisplayName/Icon16/Icon32/Panel/Contexts/OnExecute/DockablePanel) |
+| `IDockablePanelDescriptor.cs` | interface mô tả palette (Id/Title/DockingState/MinSize/CreateContent/OnContentEmbedded) |
+| `MCGRibbonManager.cs` | builder chính — RegisterTool() + Build() + Cleanup() |
+| `DockableWindowHost.cs` | WPF embed vào DockableWindow (đóng gói 6 quirks) |
+| `PictureDispConverter.cs` | Bitmap → IPictureDisp + LoadBitmapFromResource(Assembly, fullName) |
+| `README.md` | hướng dẫn copy sang addin khác |
+
+**Tách infrastructure nội bộ sang `Infrastructure/`:**
+- `Infrastructure/IModule.cs` — `MCGInventorPlugin.Infrastructure` (addin-internal, không trong Core)
+- `Infrastructure/ModuleManager.cs` — gọi `MCGRibbonManager` từ Core
+
+**Xóa:**
+- `Controllers/SymbolHandler/RibbonController.cs` (logic đã chuyển sang MCGRibbonManager + DockableWindowHost + SymbolHandlerToolDescriptor)
+- `Utilities/PictureDispConverter.cs` (move vào Core/)
+- `Core/Ribbon/` folder (flatten vào `Core/`)
+
+**Mapping panel ↔ ribbon cố định:**
+| Panel | Ribbon hiện |
+|-------|------------|
+| Model | Part + Assembly |
+| Drawing | Drawing |
+| Utility | Part + Assembly + Drawing |
+
+Panel trống (không tool nào match) → skip tạo.
+
+**Cơ chế share tab multi-addin:**
+- Tab Id `id.Tab.MCGTools`, panel Id `id.Panel.MCGTools.{Model|Drawing|Utility}` — cố định trong MCGRibbonManager
+- Mỗi addin tạo `MCGRibbonManager` instance với GUID riêng
+- Pattern `try { tabs[id] } catch { tabs.Add(...) }` → addin load trước tạo tab, addin load sau tái sử dụng + add button của mình
+
+**File tạo/sửa trong session:**
+- Tạo: `Core/PanelLocation.cs`, `RibbonContext.cs`, `IToolDescriptor.cs`, `IDockablePanelDescriptor.cs`, `MCGRibbonManager.cs`, `DockableWindowHost.cs`, `PictureDispConverter.cs`, `README.md`
+- Tạo: `Infrastructure/IModule.cs`, `ModuleManager.cs`
+- Tạo: `Modules/SymbolHandler/SymbolHandlerToolDescriptor.cs`
+- Sửa: `MCGInventorPluginAddin.cs` (import Infrastructure), `Modules/SymbolHandlerModule.cs` (IModule mới — GetTools()/OnUIReady()), `Utilities/PictureDispConverter.cs` (xóa), `Controllers/SymbolHandler/RibbonController.cs` (xóa)
+
+**Icon API thay đổi:** `IToolDescriptor` trước dùng 3 string (`IconResourceModule`, `Icon16Resource`, `Icon32Resource`) → giờ dùng `Bitmap Icon16 { get; }`, `Bitmap Icon32 { get; }`. Mỗi addin tự load icon từ assembly của mình (portable).
+
+**Test PASS** — tab "MCG TOOLS" hiện đúng trên Drawing ribbon, button Symbol Handler hoạt động bình thường.
+
+---
+### Session: 2026-04-14 — Checkbox wiring + Attribute DataGrid + Field edit realtime
+
+**Ngày**: 2026-04-14
+
+**Tóm tắt**: Hoàn thiện tính năng properties — wire checkbox vào Insert, thêm DataGrid attribute với edit realtime khi pick symbol trên bản vẽ.
+
+**Bước A — Wire checkboxes**:
+- `Views/SymbolHandler/SymbolHandlerPanel.xaml.cs`: thêm 4 public properties `InsertStatic`, `InsertSymbolClipping`, `InsertLeaderEnabled`, `InsertLeaderVisible`
+- `Services/SymbolHandler/ISymbolReplaceService.cs` + `SymbolReplaceService.cs`: `InsertSymbol()` nhận thêm params isStatic/symbolClipping/leaderEnabled/leaderVisible
+- `TryAddLeader()` + `AttachLeaderToGeometry()`: dùng `leaderVisible` thay hardcode
+- `ReplaceOne()`: snapshot thêm `SymbolClipping` + `LeaderVisible` từ symbol cũ + restore
+- `ReplaceController.OnInsertPointPicked()`: đọc checkbox từ panel, truyền vào service
+
+**Bước B — Attribute DataGrid**:
+- Tạo `Models/SymbolHandler/PromptFieldModel.cs` (Name/Value/TextBoxIndex, INotifyPropertyChanged)
+- `SymbolHandlerPanel.xaml`: thêm section ATTRIBUTES với DataGrid (Field readonly + Value editable)
+- `SymbolHandlerPanel.xaml.cs`: `SetPromptFields()`, `GetPromptFields()` dùng ObservableCollection
+- `PaletteController.OnSymbolSelectionChanged()`: trích xuất prompt fields từ definition (`ExtractPromptFieldsFromDefinition`), load vào DataGrid
+
+**Bước C — Insert + Pick symbol edit realtime**:
+- `ISymbolReplaceService.InsertSymbol()`: thêm param `Dictionary<int, string> promptValues` → override default
+- `ISymbolReplaceService.UpdatePromptText(symbol, tbIndex, value)`: dùng `SetPromptResultText()` trong Transaction
+- `InteractionController.cs`: thêm class `SelectionListener` dùng `UserInputEvents.OnSelect` — listen user click symbol bất kỳ lúc nào (ngoài pick/insert mode)
+- Events: `SymbolSelected` (có SketchedSymbol) + `NonSymbolSelected` (clear)
+- `SymbolHandlerModule.cs`: khởi tạo `SelectionListener` + `Start()` trong CreateUI
+- `ReplaceController.OnDrawingSymbolSelected()`: load actual values từ instance (`GetResultText()`), wire PropertyChanged trên mỗi field → gọi `UpdatePromptText()` realtime (1 Transaction per cell edit = 1 Undo step)
+
+**Fix bonus**:
+- Bug `TryGetValue(out value)` trong `BuildPromptStrings` ghi đè default = null khi key không tồn tại → dùng pattern `if (TryGetValue(out var snapVal))` để chỉ ghi đè khi có key
+- Thông báo cụ thể khi 2 symbol khác field count: `"Cannot replace: 'X' has N field(s), 'Y' has M field(s). Fields are incompatible."`
+- Warning khi Replace All với field count khác nhau: `"K symbol(s) replaced. Fields differ — default values used for unmatched fields."`
+
+**UI tweaks**:
+- Default tick `chkStatic`, `chkLeader`, `chkLeaderVisible`
+- Bỏ preview image trong Properties panel (thumbnail đã có trên symbol list)
+- `RibbonController`: thêm force hide timer (2s) chặn Inventor restore visibility từ session → palette chỉ hiện khi user click button
+
+**Files sửa/tạo**:
+- Tạo: `Models/SymbolHandler/PromptFieldModel.cs`
+- Sửa: `Views/SymbolHandler/SymbolHandlerPanel.xaml` + `.cs`
+- Sửa: `Services/SymbolHandler/ISymbolReplaceService.cs` + `SymbolReplaceService.cs`
+- Sửa: `Controllers/SymbolHandler/PaletteController.cs`, `ReplaceController.cs`, `InteractionController.cs`, `RibbonController.cs`
+- Sửa: `Modules/SymbolHandlerModule.cs`
+- Cấu hình: `.claude/settings.local.json` — thêm wildcards cho dev cycle (taskkill, cmd.exe, dotnet.exe, start)
 
 ---
 ### Session: 2026-04-09 (run 12) — Memory audit + Cleanup fixes + UI fixes

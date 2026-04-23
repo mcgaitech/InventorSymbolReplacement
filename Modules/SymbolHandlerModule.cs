@@ -1,8 +1,11 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using Inventor;
-using MCGInventorPlugin.Core;
+using MCG.Inventor.Ribbon;
 using MCGInventorPlugin.Controllers.SymbolHandler;
+using MCGInventorPlugin.Infrastructure;
+using MCGInventorPlugin.Modules.SymbolHandler;
 using MCGInventorPlugin.Services.SymbolHandler;
 using MCGInventorPlugin.Views.SymbolHandler;
 
@@ -10,14 +13,13 @@ namespace MCGInventorPlugin.Modules
 {
     /// <summary>
     /// Module Symbol Handler — quản lý insert/replace SketchedSymbol trên Drawing.
-    /// Implements IModule để đăng ký với ModuleManager.
+    /// Module chỉ trả về IToolDescriptor — MCGRibbonManager tự tạo ribbon/button/palette.
     /// </summary>
     public class SymbolHandlerModule : IModule
     {
         private const string LOG_PREFIX = "[SymbolHandlerModule]";
 
-        public string Name        => "Symbol Handler";
-        public string Environment => "Drawing";
+        public string Name => "Symbol Handler";
 
         // Services
         private IConfigService        _configService;
@@ -26,13 +28,15 @@ namespace MCGInventorPlugin.Modules
         private ISymbolReplaceService _symbolReplaceService;
 
         // Controllers
-        private RibbonController      _ribbonController;
         private PaletteController     _paletteController;
         private InteractionController _interactionController;
         private ReplaceController     _replaceController;
         private SelectionListener     _selectionListener;
 
-        private bool _uiCreated = false;
+        // Tool descriptor — giữ reference để access panel sau khi ribbon build
+        private SymbolHandlerToolDescriptor _toolDescriptor;
+
+        private bool _uiWired = false;
 
         public void Activate(Application app, bool firstTime)
         {
@@ -43,7 +47,6 @@ namespace MCGInventorPlugin.Modules
             _thumbnailService     = new ThumbnailService();
             _symbolReplaceService = new SymbolReplaceService(app);
 
-            _ribbonController      = new RibbonController(app);
             _paletteController     = new PaletteController(app, _libraryService, _thumbnailService, _configService);
             _interactionController = new InteractionController(app);
             _selectionListener     = new SelectionListener(app);
@@ -52,23 +55,37 @@ namespace MCGInventorPlugin.Modules
             Debug.WriteLine($"{LOG_PREFIX} Services + Controllers khởi tạo.");
         }
 
-        public void CreateUI(Application app)
+        public IEnumerable<IToolDescriptor> GetTools()
         {
-            if (_uiCreated) return;
+            _toolDescriptor = new SymbolHandlerToolDescriptor();
+            return new IToolDescriptor[] { _toolDescriptor };
+        }
+
+        public void OnUIReady()
+        {
+            if (_uiWired) return;
+            if (_toolDescriptor == null) return;
 
             try
             {
-                _ribbonController.CreateRibbonUI();
-                _paletteController.SetPanel(_ribbonController.Panel);
+                var panel = _toolDescriptor.CreatedPanel;
+                if (panel == null)
+                {
+                    Debug.WriteLine($"{LOG_PREFIX} CẢNH BÁO: CreatedPanel null — chưa có content embed.");
+                    return;
+                }
+
+                _paletteController.SetPanel(panel);
                 _paletteController.Initialize();
-                _replaceController.SetPanel(_ribbonController.Panel);
+                _replaceController.SetPanel(panel);
                 _selectionListener.Start();
-                _uiCreated = true;
-                Debug.WriteLine($"{LOG_PREFIX} Ribbon UI + Panel wiring THÀNH CÔNG.");
+                _uiWired = true;
+
+                Debug.WriteLine($"{LOG_PREFIX} UI wiring THÀNH CÔNG.");
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"{LOG_PREFIX} LỖI CreateUI: {ex.Message}");
+                Debug.WriteLine($"{LOG_PREFIX} LỖI OnUIReady: {ex.Message}");
             }
         }
 
@@ -76,27 +93,25 @@ namespace MCGInventorPlugin.Modules
         {
             Debug.WriteLine($"{LOG_PREFIX} Cleanup...");
 
-            // Unhook keyboard NGAY ĐẦU TIÊN
+            // Unhook keyboard NGAY ĐẦU TIÊN (trước khi WPF panel bị dispose)
             try { SymbolHandlerPanel.CleanupKeyboardHook(); }
             catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI keyboard cleanup: {ex.Message}"); }
 
-            // Controllers cleanup — thứ tự ngược với Activate (LIFO)
-            try { _replaceController?.Cleanup(); }      catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI ReplaceController: {ex.Message}"); }
-            try { _selectionListener?.Stop(); }          catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI SelectionListener: {ex.Message}"); }
-            try { _interactionController?.Cleanup(); }   catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI InteractionController: {ex.Message}"); }
-            try { _paletteController?.Cleanup(); }       catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI PaletteController: {ex.Message}"); }
-            try { _ribbonController?.Cleanup(); }        catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI RibbonController: {ex.Message}"); }
+            // Controllers cleanup — LIFO
+            try { _replaceController?.Cleanup(); }     catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI ReplaceController: {ex.Message}"); }
+            try { _selectionListener?.Stop(); }         catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI SelectionListener: {ex.Message}"); }
+            try { _interactionController?.Cleanup(); }  catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI InteractionController: {ex.Message}"); }
+            try { _paletteController?.Cleanup(); }      catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI PaletteController: {ex.Message}"); }
 
-            // Giải phóng references — Services không có Cleanup() riêng nhưng cần null hóa
             _replaceController     = null;
             _selectionListener     = null;
             _interactionController = null;
             _paletteController     = null;
-            _ribbonController      = null;
             _symbolReplaceService  = null;
             _thumbnailService      = null;
             _libraryService        = null;
             _configService         = null;
+            _toolDescriptor        = null;
 
             Debug.WriteLine($"{LOG_PREFIX} Cleanup THÀNH CÔNG.");
         }

@@ -373,7 +373,7 @@
                               IsChecked="True"
                               Checked="ChkLeader_Changed" Unchecked="ChkLeader_Changed"/>
                     <CheckBox x:Name="chkLeaderVisible" Content="Leader Visible"
-                              FontSize="11" IsEnabled="False"/>
+                              FontSize="11" IsChecked="True"/>
                 </StackPanel>
 
                 <!-- Prompt fields (attributes) DataGrid -->

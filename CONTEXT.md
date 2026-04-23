@@ -32,7 +32,7 @@ Trong bản vẽ IDW của Inventor, người dùng cần thay thế các Sketch
 
 **Workflow sau khi có tool**:
 
-1. Mở palette Symbol Handler từ ribbon Custom Tools
+1. Mở palette Symbol Handler từ ribbon MCG TOOLS
 2. Chọn symbol mới từ danh sách thumbnail trong palette
 3. Click "Replace" → click vào symbol cũ trên bản vẽ → replace ngay
 4. Hoặc "Replace All" → chọn phạm vi (Current Sheet / All Sheets) → confirm → done
@@ -146,7 +146,7 @@ MCGInventorPlugin/
 | --- | -------------------------------------------------------------- | ------------------------------------------------- |
 | 1   | UI dùng WPF thay WinForms                                      | MVVM pattern, binding, styling dễ hơn             |
 | 2   | Embed WPF vào DockableWindow qua HwndSource                    | Inventor DockableWindow chỉ nhận Win32 HWND       |
-| 3   | DI thủ công trong `SymbolHandlerAddin.Activate()`             | Tránh thêm dependency framework phức tạp          |
+| 3   | DI thủ công trong `SymbolHandlerAddin.Activate()`              | Tránh thêm dependency framework phức tạp          |
 | 4   | Symbol source: Library file + Working file kết hợp             | User không cần copy/paste thủ công                |
 | 5   | Library default path: `C:\server\System\2023\Inventor\Library` | Đường dẫn server chuẩn của công ty                |
 | 6   | Mở library file ở chế độ ẩn (`openVisible: false`)             | Không làm phiền workflow user                     |
@@ -155,7 +155,7 @@ MCGInventorPlugin/
 | 9   | Single replace: 1 Transaction per instance                     | Granular undo cho từng thao tác                   |
 | 10  | Replace All: 1 Transaction bao toàn bộ                         | Undo 1 lần duy nhất, sạch sẽ                      |
 | 11  | Replace All có 2 scope: Current Sheet / All Sheets             | Tránh replace nhầm sang sheet khác                |
-| 12  | Ribbon entry: tab "Custom Tools"                               | Nhất quán với các tool nội bộ khác của team       |
+| 12  | Ribbon entry: tab "MCG TOOLS"                                  | Nhất quán với các tool nội bộ khác của team       |
 
 ---
 
@@ -293,7 +293,7 @@ ie.Start();
 
 - [ ] Build không lỗi
 - [ ] Addin xuất hiện trong Inventor Add-In Manager
-- [ ] Tab "Custom Tools" hiện trên Drawing ribbon
+- [ ] Tab "MCG TOOLS" hiện trên Drawing ribbon
 - [ ] Click button → DockableWindow mở bên phải
 - [ ] Log khởi động hiện trong DebugView / VS Output
 
@@ -347,8 +347,8 @@ ie.Start();
 
 ## Vấn đề đã biết / Quirks của API
 
-| #   | Vấn đề                                       | Nguyên nhân                                      | Giải pháp                                     |
-| --- | -------------------------------------------- | ------------------------------------------------ | --------------------------------------------- |
-| 1   | Build lỗi CS0246                             | HintPath sai đường dẫn DLL                       | Cập nhật `<InventorBinPath>` trong `.csproj`  |
+| #   | Vấn đề                                       | Nguyên nhân                                      | Giải pháp                                    |
+| --- | -------------------------------------------- | ------------------------------------------------ | -------------------------------------------- |
+| 1   | Build lỗi CS0246                             | HintPath sai đường dẫn DLL                       | Cập nhật `<InventorBinPath>` trong `.csproj` |
 | 2   | `$(AppData)` không hợp lệ trong `.addin` XML | `.addin` là XML thuần, không expand MSBuild vars | Dùng đường dẫn tương đối `SymbolHandler.dll` |
-| 3   | `EmbedInteropTypes` phải là `False`          | Inventor API resolve interfaces lúc runtime      | Đã fix trong `.csproj`                        |
+| 3   | `EmbedInteropTypes` phải là `False`          | Inventor API resolve interfaces lúc runtime      | Đã fix trong `.csproj`                       |

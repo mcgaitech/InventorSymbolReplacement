@@ -9,6 +9,7 @@ Build project và báo cáo kết quả chi tiết.
 ## Bước thực hiện
 
 1. Chạy build:
+
 ```
 dotnet build -c Debug
 ```
@@ -20,16 +21,18 @@ dotnet build -c Debug
 3. Nếu build thành công, nhắc user test checklist:
 
 ### Inventor AddIn
+
 ```
 [ ] File .addin đã được copy đến %APPDATA%\Autodesk\Inventor 2023\Addins\?
 [ ] File .dll đã được copy đến cùng thư mục?
 [ ] Mở Inventor → Tools → Add-In Manager → "Symbol Replacer" xuất hiện?
-[ ] Mở một file .idw → Tab "Custom Tools" hiện trên ribbon?
+[ ] Mở một file .idw → Tab "MCG TOOLS" hiện trên ribbon?
 [ ] Click button → DockableWindow/Palette mở ra?
 [ ] Kiểm tra DebugView hoặc VS Output để xem log khởi động
 ```
 
 ### AutoCAD Plugin
+
 ```
 [ ] Thư mục .bundle đã được copy đến %APPDATA%\Autodesk\ApplicationPlugins\?
 [ ] Mở AutoCAD → gõ lệnh NETLOAD nếu cần load thủ công

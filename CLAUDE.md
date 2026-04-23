@@ -84,7 +84,7 @@ C:\MacGregor_CAS_WF\Designs\40 Products\DOOR\EXTERNAL DOOR\Vertical Sliding Door
 │                                                                 │
 │  "✓ Build thành công. Inventor đang mở file [tên file].        │
 │   Đợi 20–30 giây để load xong rồi test nhé.                   │
-│   Kiểm tra ribbon 'Custom Tools' có hiện chưa?                 │
+│   Kiểm tra ribbon 'MCG TOOLS' có hiện chưa?                 │
 │   Cho tôi biết kết quả."                                       │
 └────────────────────────────────────────────────────────────────┘
          │

@@ -2,7 +2,7 @@ using System;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Inventor;
-using MCGInventorPlugin.Core;
+using MCGInventorPlugin.Infrastructure;
 using MCGInventorPlugin.Modules;
 
 namespace MCGInventorPlugin
@@ -17,7 +17,8 @@ namespace MCGInventorPlugin
     [ComVisible(true)]
     public class MCGInventorPluginAddin : ApplicationAddInServer
     {
-        private const string LOG_PREFIX = "[MCGInventorPlugin]";
+        private const string LOG_PREFIX  = "[MCGInventorPlugin]";
+        internal const string ADDIN_GUID = "{7C3D8E4F-2A1B-4C5D-9E8F-1A2B3C4D5E6F}";
 
         private Inventor.Application _app;
         private ModuleManager _moduleManager;
@@ -32,15 +33,14 @@ namespace MCGInventorPlugin
                 _app = addInSiteObject.Application;
                 Debug.WriteLine($"{LOG_PREFIX} Inventor version: {_app.SoftwareVersion.DisplayVersion}");
 
-                // Đăng ký tất cả modules
                 _moduleManager = new ModuleManager();
                 _moduleManager.Register(new SymbolHandlerModule());
-                // Tương lai:
+                // Tương lai: đăng ký modules khác
                 // _moduleManager.Register(new PartToolsModule());
                 // _moduleManager.Register(new AssemblyToolsModule());
+                // _moduleManager.Register(new UtilityToolsModule());
 
-                // Khởi tạo + tạo UI
-                _moduleManager.ActivateAll(_app, firstTime);
+                _moduleManager.ActivateAll(_app, ADDIN_GUID, firstTime);
 
                 Debug.WriteLine($"{LOG_PREFIX} ===== Addin kích hoạt THÀNH CÔNG =====");
             }
