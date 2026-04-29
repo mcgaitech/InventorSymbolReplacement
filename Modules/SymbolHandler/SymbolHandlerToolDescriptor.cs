@@ -44,10 +44,13 @@ namespace MCGInventorPlugin.Modules.SymbolHandler
 
         private static Bitmap LoadIcon(string fileName)
         {
-            // Resource naming: {AssemblyRootNamespace}.Resources.SymbolHandler.{fileName}
-            // Với MCGInventorPlugin: "MCGInventorPlugin.Resources.SymbolHandler.ReplaceSymbol_16.png"
+            // Resource naming dùng RootNamespace (MCGInventorPlugin) — KHÔNG dùng AssemblyName.
+            // Sau khi rename assembly thành MCG_InventorSymbolHandler, asm.GetName().Name không còn
+            // khớp với RootNamespace trong .csproj nữa, nên phải lấy namespace từ type chính xác.
+            // Resource ID thực tế: "MCGInventorPlugin.Resources.SymbolHandler.ReplaceSymbol_16.png"
             var asm = Assembly.GetExecutingAssembly();
-            string resourceName = $"{asm.GetName().Name}.Resources.SymbolHandler.{fileName}";
+            string rootNs = typeof(SymbolHandlerToolDescriptor).Namespace.Split('.')[0];
+            string resourceName = $"{rootNs}.Resources.SymbolHandler.{fileName}";
             return PictureDispConverter.LoadBitmapFromResource(asm, resourceName);
         }
     }

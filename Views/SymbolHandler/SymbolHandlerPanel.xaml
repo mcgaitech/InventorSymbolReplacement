@@ -118,7 +118,7 @@
                 BorderBrush="#FFB4B4B4"
                 Padding="6,5">
             <StackPanel>
-                <!-- Tab bar: File | Local -->
+                <!-- Tab bar: File | Local + Help button -->
                 <DockPanel Margin="0,0,0,4">
                     <TextBlock Text="SOURCE:"
                                FontSize="11"
@@ -126,6 +126,23 @@
                                Foreground="#FF646464"
                                VerticalAlignment="Center"
                                Margin="0,0,6,0"/>
+                    <!-- Help button — nằm phải cùng dòng với SOURCE -->
+                    <Button x:Name="btnHelp"
+                            DockPanel.Dock="Right"
+                            Content="?"
+                            Width="20" Height="20"
+                            Padding="0"
+                            VerticalAlignment="Center"
+                            HorizontalAlignment="Right"
+                            Background="Transparent"
+                            BorderBrush="#FFB4B4B4"
+                            BorderThickness="1"
+                            FontSize="11"
+                            FontWeight="Bold"
+                            Foreground="#FF0078D4"
+                            Cursor="Hand"
+                            ToolTip="Open user guide"
+                            Click="BtnHelp_Click"/>
                     <StackPanel Orientation="Horizontal">
                         <RadioButton x:Name="rbSourceFile"
                                      Content="File"
@@ -521,6 +538,17 @@
                            FontWeight="Bold"
                            Foreground="#FF646464"
                            Margin="0,0,0,4"/>
+
+                <!-- Select Similar — highlight all instances matching picked symbol's definition -->
+                <Button x:Name="btnSelectSimilar"
+                        Content="⎚  Select Similar"
+                        Height="28"
+                        Margin="0,0,0,3"
+                        IsEnabled="False"
+                        Cursor="Hand"
+                        FontSize="12"
+                        ToolTip="Pick a symbol on the drawing first, then click to highlight all instances of its definition"
+                        Click="BtnSelectSimilar_Click"/>
 
                 <!-- Scan Sheet — highlight symbols not in palette -->
                 <Button x:Name="btnScanSheet"

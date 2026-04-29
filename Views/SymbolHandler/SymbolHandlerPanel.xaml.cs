@@ -59,6 +59,9 @@ namespace MCGInventorPlugin.Views.SymbolHandler
         /// <summary>Raised khi user click "Clear Highlight".</summary>
         public event EventHandler ClearHighlightRequested;
 
+        /// <summary>Raised khi user click "Select Similar" (highlight instances cùng def với symbol đã pick).</summary>
+        public event EventHandler SelectSimilarRequested;
+
         /// <summary>Raised khi user chọn tab "Local" — PaletteController load từ active document.</summary>
         public event EventHandler LocalSourceRequested;
 
@@ -302,6 +305,12 @@ namespace MCGInventorPlugin.Views.SymbolHandler
             Dispatcher.Invoke(() => btnClearHighlight.IsEnabled = active);
         }
 
+        /// <summary>Bật/tắt nút Select Similar dựa theo có symbol được pick trên bản vẽ hay không.</summary>
+        public void SetSelectSimilarEnabled(bool enabled)
+        {
+            Dispatcher.Invoke(() => btnSelectSimilar.IsEnabled = enabled);
+        }
+
         /// <summary>Cập nhật Properties panel khi user chọn symbol khác.</summary>
         public void SetSelectedSymbolProperties(SymbolDefinitionModel model)
         {
@@ -501,6 +510,12 @@ namespace MCGInventorPlugin.Views.SymbolHandler
 
         // ─── Scan / Highlight buttons ─────────────────────────────────────────
 
+        private void BtnSelectSimilar_Click(object sender, RoutedEventArgs e)
+        {
+            Debug.WriteLine($"{LOG_PREFIX} Select Similar clicked.");
+            SelectSimilarRequested?.Invoke(this, EventArgs.Empty);
+        }
+
         private void BtnScanSheet_Click(object sender, RoutedEventArgs e)
         {
             Debug.WriteLine($"{LOG_PREFIX} Scan Sheet clicked.");
@@ -511,6 +526,53 @@ namespace MCGInventorPlugin.Views.SymbolHandler
         {
             Debug.WriteLine($"{LOG_PREFIX} Clear Highlight clicked.");
             ClearHighlightRequested?.Invoke(this, EventArgs.Empty);
+        }
+
+        // ─── Help button ─────────────────────────────────────────────────────
+        // Help.html được embed vào DLL (EmbeddedResource). Khi click:
+        //   1. Extract ra %TEMP%\MCGInventorPlugin\Help.html (ghi đè mỗi lần để luôn dùng bản mới nhất)
+        //   2. Mở bằng default browser qua Process.Start
+        private void BtnHelp_Click(object sender, RoutedEventArgs e)
+        {
+            Debug.WriteLine($"{LOG_PREFIX} Help clicked.");
+            try
+            {
+                string tempDir = System.IO.Path.Combine(
+                    System.IO.Path.GetTempPath(), "MCGInventorPlugin");
+                System.IO.Directory.CreateDirectory(tempDir);
+
+                string helpPath = System.IO.Path.Combine(tempDir, "Help.html");
+
+                var asm      = System.Reflection.Assembly.GetExecutingAssembly();
+                string resId = "MCGInventorPlugin.Resources.SymbolHandler.Help.html";
+
+                using (var stream = asm.GetManifestResourceStream(resId))
+                {
+                    if (stream == null)
+                    {
+                        Debug.WriteLine($"{LOG_PREFIX} LỖI: Không tìm thấy embedded resource '{resId}'.");
+                        MessageBox.Show(
+                            "Help file not found in assembly.\nExpected resource: " + resId,
+                            "Symbol Handler — Help",
+                            MessageBoxButton.OK, MessageBoxImage.Warning);
+                        return;
+                    }
+
+                    using (var fs = System.IO.File.Create(helpPath))
+                        stream.CopyTo(fs);
+                }
+
+                Process.Start(new ProcessStartInfo(helpPath) { UseShellExecute = true });
+                Debug.WriteLine($"{LOG_PREFIX} Đã mở help file: {helpPath}");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"{LOG_PREFIX} LỖI mở help: {ex.Message}");
+                MessageBox.Show(
+                    "Cannot open help file: " + ex.Message,
+                    "Symbol Handler — Help",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         }
 
         // ─── Change library button ────────────────────────────────────────────

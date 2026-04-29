@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Symbol Handler — User Guide</title>
+<style>
+  :root {
+    --accent: #0078D4;
+    --border: #D0D7DE;
+    --bg: #FFFFFF;
+    --surface: #F6F8FA;
+    --text: #1F2328;
+    --muted: #57606A;
+    --warn: #9A6700;
+    --code-bg: #EFF1F3;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    font-size: 14px;
+    line-height: 1.55;
+    color: var(--text);
+    background: var(--bg);
+    margin: 0;
+    padding: 0;
+  }
+  .wrap {
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 24px 28px 48px;
+  }
+  h1 {
+    font-size: 26px;
+    margin: 0 0 4px 0;
+    color: var(--accent);
+    border-bottom: 2px solid var(--accent);
+    padding-bottom: 8px;
+  }
+  h2 {
+    font-size: 18px;
+    margin: 28px 0 10px 0;
+    padding: 6px 10px;
+    background: var(--surface);
+    border-left: 3px solid var(--accent);
+    border-radius: 2px;
+  }
+  h3 {
+    font-size: 15px;
+    margin: 18px 0 6px 0;
+    color: var(--muted);
+  }
+  p { margin: 6px 0 10px; }
+  ul, ol { margin: 6px 0 12px; padding-left: 24px; }
+  li { margin: 3px 0; }
+  code {
+    font-family: Consolas, 'SF Mono', monospace;
+    font-size: 12.5px;
+    background: var(--code-bg);
+    padding: 1px 6px;
+    border-radius: 3px;
+  }
+  kbd {
+    font-family: Consolas, monospace;
+    font-size: 11.5px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-bottom-width: 2px;
+    padding: 1px 6px;
+    border-radius: 3px;
+  }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 8px 0 14px;
+    font-size: 13px;
+  }
+  th, td {
+    border: 1px solid var(--border);
+    padding: 6px 10px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th {
+    background: var(--surface);
+    font-weight: 600;
+  }
+  .note {
+    background: #FFF8E1;
+    border-left: 3px solid #F9A825;
+    padding: 8px 12px;
+    margin: 12px 0;
+    border-radius: 2px;
+    color: var(--warn);
+    font-size: 13px;
+  }
+  .tip {
+    background: #E8F5E9;
+    border-left: 3px solid #2E7D32;
+    padding: 8px 12px;
+    margin: 12px 0;
+    border-radius: 2px;
+    font-size: 13px;
+  }
+  .toc {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 10px 16px;
+    border-radius: 4px;
+    margin: 16px 0 24px;
+  }
+  .toc ul { margin: 4px 0; }
+  .toc a {
+    color: var(--accent);
+    text-decoration: none;
+  }
+  .toc a:hover { text-decoration: underline; }
+  .subtitle {
+    color: var(--muted);
+    margin: 0 0 8px 0;
+    font-size: 13px;
+  }
+  .btn {
+    display: inline-block;
+    padding: 1px 6px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    font-size: 12.5px;
+    font-family: 'Segoe UI', sans-serif;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Symbol Handler — User Guide</h1>
+<p class="subtitle">MCG Inventor Plugin · Drawing environment · Inventor 2023</p>
+
+<div class="toc">
+  <strong>Contents</strong>
+  <ul>
+    <li><a href="#overview">1. Overview</a></li>
+    <li><a href="#source">2. Source (File / Local)</a></li>
+    <li><a href="#search">3. Search &amp; View Modes</a></li>
+    <li><a href="#properties">4. Properties &amp; Attributes</a></li>
+    <li><a href="#replace">5. Replace Symbols</a></li>
+    <li><a href="#insert">6. Insert Symbol</a></li>
+    <li><a href="#scan">7. Scan &amp; Select Similar</a></li>
+    <li><a href="#edit">8. Edit Attributes In-Place</a></li>
+    <li><a href="#tips">9. Tips &amp; Troubleshooting</a></li>
+  </ul>
+</div>
+
+<h2 id="overview">1. Overview</h2>
+<p>
+  <strong>Symbol Handler</strong> is a palette tool that helps you insert,
+  replace and manage Sketched Symbols in Inventor drawings while preserving
+  position, scale, layer, leader and attribute values.
+</p>
+<p>Open the palette from the ribbon tab <strong>MCG TOOLS → Symbol Handler</strong> (Drawing environment only).</p>
+
+<h2 id="source">2. Source (File / Local)</h2>
+<p>Switch between two symbol sources using the radio buttons at the top of the palette.</p>
+<table>
+  <tr><th style="width:100px">Source</th><th>Behavior</th></tr>
+  <tr>
+    <td><strong>File</strong></td>
+    <td>
+      Load symbols from a library <code>.idw</code> file (or a folder of
+      <code>.idw</code> files). Type or paste a path into the box and press
+      <kbd>Enter</kbd>, or click <span class="btn">⚙</span> to browse.
+    </td>
+  </tr>
+  <tr>
+    <td><strong>Local</strong></td>
+    <td>Show symbols already defined in the active drawing document.</td>
+  </tr>
+</table>
+
+<h2 id="search">3. Search &amp; View Modes</h2>
+<ul>
+  <li><strong>Search</strong>: type to filter symbols by name (case-insensitive, matches substring).</li>
+  <li><strong>View toggle</strong> (⊞ Grid / ☰ List): switch between thumbnail grid and compact list view.</li>
+  <li><strong>Arrow keys</strong> (<kbd>↑</kbd> / <kbd>↓</kbd>): navigate the list when focused.</li>
+  <li><strong>Double-click</strong> a symbol: start insert mode immediately.</li>
+  <li><strong>Right-click</strong> a symbol: context menu → <em>Insert into Drawing</em>.</li>
+</ul>
+
+<h2 id="properties">4. Properties &amp; Attributes</h2>
+<p>When a symbol is selected on the palette, the Properties panel shows:</p>
+<ul>
+  <li><strong>Scale</strong> and <strong>Rotate</strong> (degrees) — used when inserting new symbols.</li>
+  <li><strong>Static</strong> — hide grip points (scale + rotate handles).</li>
+  <li><strong>Symbol Clipping</strong> — trim annotations behind the symbol.</li>
+  <li><strong>Leader</strong> — attach a leader line to the picked geometry.</li>
+  <li><strong>Leader Visible</strong> — show/hide the leader line (only meaningful when Leader is on).</li>
+  <li><strong>Attributes DataGrid</strong> — lists all prompt fields of the symbol definition with editable values. Populated automatically from the symbol's defaults; fill in custom values before Insert or Replace.</li>
+</ul>
+
+<h2 id="replace">5. Replace Symbols</h2>
+<h3>Replace single</h3>
+<ol>
+  <li>Select the new symbol from the palette.</li>
+  <li>(Optional) Edit attribute values in the Attributes DataGrid.</li>
+  <li>Click <span class="btn">🔄 Replace</span> → cursor enters pick mode.</li>
+  <li>Click an old symbol on the drawing → replaced in place.</li>
+</ol>
+
+<h3>Replace All</h3>
+<ol>
+  <li>Select the new symbol from the palette.</li>
+  <li>Click <span class="btn">🔄 Replace All ▾</span> → choose scope:
+    <ul>
+      <li><strong>Current Sheet Only</strong> — replace all matching instances on the active sheet.</li>
+      <li><strong>All Sheets</strong> — replace everywhere in the document (confirmation dialog shows breakdown per sheet).</li>
+    </ul>
+  </li>
+  <li>Click an old symbol on the drawing → all instances sharing its definition are replaced in one Undo step.</li>
+</ol>
+
+<h3>What is preserved</h3>
+<table>
+  <tr><th>Property</th><th>Behavior</th></tr>
+  <tr><td>Position</td><td>Always preserved.</td></tr>
+  <tr><td>Scale</td><td>Always preserved.</td></tr>
+  <tr><td>Layer</td><td>Preserved.</td></tr>
+  <tr><td>Static / Symbol Clipping / Leader Visible</td><td>Preserved from the old instance.</td></tr>
+  <tr><td>Leader (attached geometry)</td><td>Re-attached to the same drawing curve / sketch line.</td></tr>
+  <tr><td>Rotation</td><td>Preserved when old and new definitions are the same (update case). Reset to 0 when definitions differ (cross-definition replace, to avoid flipped orientation).</td></tr>
+  <tr><td>Attribute values</td><td>Copied from old instance when fields match. Values you type in the Attributes DataGrid override the copied values.</td></tr>
+</table>
+
+<div class="note">
+  <strong>Cross-definition flip:</strong> Different symbol definitions may have different "natural up" orientations. If the old symbol was rotated 180° to look right, the new symbol would appear upside-down. Symbol Handler resets rotation to 0 on cross-def replace so the new symbol displays in its correct orientation. If you need to preserve rotation across different definitions, adjust manually with Inventor's built-in rotate handle.
+</div>
+
+<h2 id="insert">6. Insert Symbol</h2>
+<ol>
+  <li>Select a symbol from the palette.</li>
+  <li>(Optional) Edit Scale, Rotate, checkboxes, and attribute values.</li>
+  <li>Double-click the symbol, or right-click → <em>Insert into Drawing</em>.</li>
+  <li>Click on the drawing:
+    <ul>
+      <li>on an <strong>edge</strong> or <strong>sketch line</strong> → inserted with a leader attached to that geometry;</li>
+      <li>on <strong>empty space</strong> → inserted as a floating symbol (no leader).</li>
+    </ul>
+  </li>
+  <li>Continuous mode: another insert is primed automatically. Press <kbd>Esc</kbd> to exit.</li>
+</ol>
+
+<h2 id="scan">7. Scan &amp; Select Similar</h2>
+<h3>Select Similar</h3>
+<ol>
+  <li>Click any symbol on the drawing to pick it. The <span class="btn">⎚ Select Similar</span> button becomes enabled.</li>
+  <li>Click <strong>Select Similar</strong> → all instances sharing that definition are highlighted on the active sheet, and the status bar shows the match count.</li>
+</ol>
+
+<h3>Scan Sheet</h3>
+<p>
+  Click <span class="btn">🔍 Scan Sheet</span> to highlight every symbol on the active sheet whose definition is <em>not</em> present in the current palette source. The status bar lists each unknown definition with its instance count, e.g.
+  <code>5/41 NOT in palette (3 type(s)): thickness-right (3), WELD2 (1), CL DOOR (1)</code>.
+</p>
+
+<h3>Clear Highlight</h3>
+<p>Click <span class="btn">✖ Clear Highlight</span> to clear the current selection set after Scan or Select Similar.</p>
+
+<h2 id="edit">8. Edit Attributes In-Place</h2>
+<p>
+  Click any symbol already on the drawing. The Attributes DataGrid loads that instance's actual prompt values. Edit a cell → the symbol updates immediately (each edit is one Undo step).
+</p>
+
+<h2 id="tips">9. Tips &amp; Troubleshooting</h2>
+<ul>
+  <li><strong>Undo / Redo</strong>: every Replace (single or All) and every Insert is a single Undo step. Use <kbd>Ctrl</kbd>+<kbd>Z</kbd> normally.</li>
+  <li><strong>Palette hidden on startup</strong>: open it again from the ribbon button. The palette doesn't auto-restore on session reload.</li>
+  <li><strong>Attributes empty when replacing a non-attribute symbol with an attribute symbol</strong>: fill the Attributes DataGrid first, then Replace — the typed values are applied to the new symbol.</li>
+  <li><strong>Library not loading</strong>: verify the path in the File box (type or paste, then press <kbd>Enter</kbd>). Library documents are opened invisibly and closed automatically.</li>
+  <li><strong>Log / debug output</strong>: open DebugView (Sysinternals) to watch internal messages prefixed with <code>[SymbolReplaceService]</code>, <code>[PaletteController]</code>, etc.</li>
+</ul>
+
+<p class="subtitle" style="margin-top:32px; text-align:center;">
+  MCG Inventor Plugin · Symbol Handler module
+</p>
+
+</div>
+</body>
+</html>

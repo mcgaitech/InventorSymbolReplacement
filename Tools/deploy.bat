@@ -10,9 +10,10 @@ setlocal EnableDelayedExpansion
 :: ════════════════════════════════════════════════════════════════
 
 :: ── CẤU HÌNH ────────────────────────────────────────────────────
-set ASSEMBLY=MCGInventorPlugin
+set ASSEMBLY=MCG_InventorSymbolHandler
 set DOTNET_EXE=C:\Program Files\dotnet\dotnet.exe
 set ADDIN_DIR=%APPDATA%\Autodesk\Inventor 2023\Addins
+set DLL_DIR=C:\CustomTools\Inventor
 set PROJECT_DIR=%~dp0
 :: ────────────────────────────────────────────────────────────────
 
@@ -58,31 +59,30 @@ if %BUILD_RESULT% neq 0 (
 )
 echo [OK] Build thanh cong.
 
-:: ── BƯỚC 2: Kiểm tra DLL đã copy sang Addins chưa ───────────────
+:: ── BƯỚC 2: Kiểm tra DLL đã copy sang DLL_DIR chưa ──────────────
 echo.
-echo [2/3] Kiem tra DLL trong Addins folder...
+echo [2/3] Kiem tra DLL trong %DLL_DIR%...
 
-if not exist "%ADDIN_DIR%\" (
-    echo [LOI] Addins folder khong ton tai: %ADDIN_DIR%
-    echo       Kiem tra Inventor da cai chua, hoac kiem tra bien ADDIN_DIR.
+if not exist "%DLL_DIR%\" (
+    echo [LOI] DLL folder khong ton tai: %DLL_DIR%
+    echo       Post-build event trong .csproj co the bi loi.
     exit /b 1
 )
 
-if not exist "%ADDIN_DIR%\%ASSEMBLY%.dll" (
+if not exist "%DLL_DIR%\%ASSEMBLY%.dll" (
     echo [LOI] DLL chua duoc copy:
-    echo       Mong doi: %ADDIN_DIR%\%ASSEMBLY%.dll
+    echo       Mong doi: %DLL_DIR%\%ASSEMBLY%.dll
     echo       Post-build event trong .csproj co the bi loi.
     echo.
     echo       Fix thu cong:
-    echo         copy "%PROJECT_DIR%bin\Debug\net48\%ASSEMBLY%.dll" "%ADDIN_DIR%\"
-    echo         copy "%PROJECT_DIR%%ASSEMBLY%.addin"                "%ADDIN_DIR%\"
+    echo         copy "%PROJECT_DIR%..\bin\Debug\net48\%ASSEMBLY%.dll" "%DLL_DIR%\"
     exit /b 1
 )
-echo [OK] DLL : %ADDIN_DIR%\%ASSEMBLY%.dll
+echo [OK] DLL  : %DLL_DIR%\%ASSEMBLY%.dll
 
 if not exist "%ADDIN_DIR%\%ASSEMBLY%.addin" (
     echo [WARN] File .addin chua co trong Addins folder.
-    echo        Copy thu cong: copy "%PROJECT_DIR%%ASSEMBLY%.addin" "%ADDIN_DIR%\"
+    echo        Copy thu cong: copy "%PROJECT_DIR%..\%ASSEMBLY%.addin" "%ADDIN_DIR%\"
 ) else (
     echo [OK] .addin: %ADDIN_DIR%\%ASSEMBLY%.addin
 )
@@ -90,7 +90,7 @@ if not exist "%ADDIN_DIR%\%ASSEMBLY%.addin" (
 :: ── BƯỚC 3: In thông tin DLL để verify ──────────────────────────
 echo.
 echo [3/3] Thong tin DLL...
-for %%F in ("%ADDIN_DIR%\%ASSEMBLY%.dll") do (
+for %%F in ("%DLL_DIR%\%ASSEMBLY%.dll") do (
     echo       Kich thuoc : %%~zF bytes
     echo       Thoi gian  : %%~tF
 )

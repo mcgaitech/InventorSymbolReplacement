@@ -1,0 +1,35 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.5.2.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MCG_InventorSymbolHandler", "MCG_InventorSymbolHandler.csproj", "{767603B9-B0B3-CC73-0189-63080C98BA9A}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "probe", "probe", "{1EE9DC28-B455-18B8-AB37-EF67A8D74B73}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ProbeInvApi", "probe\ProbeInvApi.csproj", "{F659B2F2-5DB4-E51B-222D-BEEE8AF0D17D}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{767603B9-B0B3-CC73-0189-63080C98BA9A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{767603B9-B0B3-CC73-0189-63080C98BA9A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{767603B9-B0B3-CC73-0189-63080C98BA9A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{767603B9-B0B3-CC73-0189-63080C98BA9A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F659B2F2-5DB4-E51B-222D-BEEE8AF0D17D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F659B2F2-5DB4-E51B-222D-BEEE8AF0D17D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F659B2F2-5DB4-E51B-222D-BEEE8AF0D17D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F659B2F2-5DB4-E51B-222D-BEEE8AF0D17D}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{F659B2F2-5DB4-E51B-222D-BEEE8AF0D17D} = {1EE9DC28-B455-18B8-AB37-EF67A8D74B73}
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {E2B526CE-E92A-480C-A502-126B1FF04573}
+	EndGlobalSection
+EndGlobal

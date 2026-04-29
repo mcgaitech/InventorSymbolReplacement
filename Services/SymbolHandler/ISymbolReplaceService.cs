@@ -10,22 +10,26 @@ namespace MCGInventorPlugin.Services.SymbolHandler
     {
         /// <summary>
         /// Replace một instance cụ thể bằng definition mới.
-        /// Giữ nguyên: Position, Rotation, Scale, Layer, Attribute values.
+        /// Giữ nguyên: Position, Scale, Layer. Rotation preserved khi same-def, reset=0 khi cross-def.
+        /// promptValues (từ DataGrid) override attribute values của new symbol — ưu tiên hơn snapshot từ old.
         /// Tạo 1 Transaction riêng → 1 Undo step.
         /// </summary>
-        bool ReplaceSingle(SketchedSymbol oldSymbol, SketchedSymbolDefinition newDef);
+        bool ReplaceSingle(SketchedSymbol oldSymbol, SketchedSymbolDefinition newDef,
+                           System.Collections.Generic.Dictionary<int, string> promptValues = null);
 
         /// <summary>
         /// Replace tất cả instance của cùng definition trên sheet hiện tại.
         /// Toàn bộ nằm trong 1 Transaction → 1 Undo step.
         /// </summary>
-        int ReplaceAllOnSheet(Sheet sheet, SketchedSymbolDefinition oldDef, SketchedSymbolDefinition newDef);
+        int ReplaceAllOnSheet(Sheet sheet, SketchedSymbolDefinition oldDef, SketchedSymbolDefinition newDef,
+                              System.Collections.Generic.Dictionary<int, string> promptValues = null);
 
         /// <summary>
         /// Replace tất cả instance của cùng definition trên toàn bộ document.
         /// Toàn bộ nằm trong 1 Transaction → 1 Undo step.
         /// </summary>
-        int ReplaceAllInDocument(DrawingDocument doc, SketchedSymbolDefinition oldDef, SketchedSymbolDefinition newDef);
+        int ReplaceAllInDocument(DrawingDocument doc, SketchedSymbolDefinition oldDef, SketchedSymbolDefinition newDef,
+                                 System.Collections.Generic.Dictionary<int, string> promptValues = null);
 
         /// <summary>
         /// Insert một instance mới của definition vào sheet tại vị trí chỉ định.

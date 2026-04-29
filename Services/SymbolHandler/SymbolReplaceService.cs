@@ -34,12 +34,14 @@ namespace MCGInventorPlugin.Services.SymbolHandler
 
         // ─── ISymbolReplaceService ────────────────────────────────────────────
 
-        public bool ReplaceSingle(SketchedSymbol oldSymbol, SketchedSymbolDefinition newDef)
+        public bool ReplaceSingle(SketchedSymbol oldSymbol, SketchedSymbolDefinition newDef,
+                                  Dictionary<int, string> promptValues = null)
         {
             if (oldSymbol == null) throw new ArgumentNullException(nameof(oldSymbol));
             if (newDef    == null) throw new ArgumentNullException(nameof(newDef));
 
-            Debug.WriteLine($"{LOG_PREFIX} ReplaceSingle: '{oldSymbol.Name}' → '{newDef.Name}'");
+            Debug.WriteLine($"{LOG_PREFIX} ReplaceSingle: '{oldSymbol.Name}' → '{newDef.Name}'" +
+                            $" promptValues={promptValues?.Count ?? 0}");
 
             var sheet = GetSheetFromSymbol(oldSymbol);
             if (sheet == null)
@@ -58,7 +60,7 @@ namespace MCGInventorPlugin.Services.SymbolHandler
             var tx = _app.TransactionManager.StartTransaction((_Document)doc, "Replace Symbol");
             try
             {
-                ReplaceOne(sheet, oldSymbol, newDef);
+                ReplaceOne(sheet, oldSymbol, newDef, promptValues);
                 tx.End();
                 Debug.WriteLine($"{LOG_PREFIX} ReplaceSingle THÀNH CÔNG.");
                 return true;
@@ -71,7 +73,8 @@ namespace MCGInventorPlugin.Services.SymbolHandler
             }
         }
 
-        public int ReplaceAllOnSheet(Sheet sheet, SketchedSymbolDefinition oldDef, SketchedSymbolDefinition newDef)
+        public int ReplaceAllOnSheet(Sheet sheet, SketchedSymbolDefinition oldDef, SketchedSymbolDefinition newDef,
+                                     Dictionary<int, string> promptValues = null)
         {
             if (sheet  == null) throw new ArgumentNullException(nameof(sheet));
             if (oldDef == null) throw new ArgumentNullException(nameof(oldDef));
@@ -102,7 +105,7 @@ namespace MCGInventorPlugin.Services.SymbolHandler
                 {
                     try
                     {
-                        ReplaceOne(sheet, sym, newDef);
+                        ReplaceOne(sheet, sym, newDef, promptValues);
                         count++;
                     }
                     catch (Exception ex)
@@ -122,7 +125,8 @@ namespace MCGInventorPlugin.Services.SymbolHandler
             return count;
         }
 
-        public int ReplaceAllInDocument(DrawingDocument doc, SketchedSymbolDefinition oldDef, SketchedSymbolDefinition newDef)
+        public int ReplaceAllInDocument(DrawingDocument doc, SketchedSymbolDefinition oldDef, SketchedSymbolDefinition newDef,
+                                        Dictionary<int, string> promptValues = null)
         {
             if (doc    == null) throw new ArgumentNullException(nameof(doc));
             if (oldDef == null) throw new ArgumentNullException(nameof(oldDef));
@@ -153,7 +157,7 @@ namespace MCGInventorPlugin.Services.SymbolHandler
                 {
                     try
                     {
-                        ReplaceOne(sheet, sym, newDef);
+                        ReplaceOne(sheet, sym, newDef, promptValues);
                         count++;
                     }
                     catch (Exception ex)
@@ -193,8 +197,8 @@ namespace MCGInventorPlugin.Services.SymbolHandler
                 return false;
             }
 
-            // Resolve definition trong active document (tránh cross-doc reference)
-            var resolvedDef = ResolveDefinitionInDocument(doc, definition);
+            // Đảm bảo definition đã tồn tại trong active document (AddByCopy nếu chưa)
+            var resolvedDef = EnsureDefinitionInDocument(doc, definition);
 
             // Nếu có promptValues từ DataGrid → convert sang snapshot format cho BuildPromptStrings
             Dictionary<string, string> insertSnapshot = null;
@@ -225,7 +229,7 @@ namespace MCGInventorPlugin.Services.SymbolHandler
             var tx = _app.TransactionManager.StartTransaction((_Document)doc, "Insert Symbol");
             try
             {
-                var newSym = sheet.SketchedSymbols.Add(resolvedDef, position, rotation, scale, promptStrings);
+                var newSym = AddSymbolWithFallback(sheet, resolvedDef, position, rotation, scale, promptStrings);
                 Debug.WriteLine($"{LOG_PREFIX}   Add() THÀNH CÔNG: '{newSym.Name}'");
 
                 // Set Static — ẩn/hiện grip points (scale + rotate)
@@ -675,7 +679,10 @@ namespace MCGInventorPlugin.Services.SymbolHandler
         /// Replace một SketchedSymbol instance: snapshot → delete → insert → restore.
         /// Phải gọi trong phạm vi Transaction đang active.
         /// </summary>
-        private void ReplaceOne(Sheet sheet, SketchedSymbol old, SketchedSymbolDefinition newDef)
+        /// <param name="promptValues">Optional: giá trị attribute từ DataGrid (TextBoxIndex → value) —
+        /// override snapshot từ old symbol. Cần thiết khi cross-def replace (old không có attribute, new có).</param>
+        private void ReplaceOne(Sheet sheet, SketchedSymbol old, SketchedSymbolDefinition newDef,
+                                Dictionary<int, string> promptValues = null)
         {
             // ── Bước 1: Snapshot toàn bộ properties cần preserve ──
             // QUAN TRỌNG: Lưu X/Y là double primitive, KHÔNG giữ COM object Point2d.
@@ -685,6 +692,21 @@ namespace MCGInventorPlugin.Services.SymbolHandler
             double rot   = old.Rotation;
             double scale = old.Scale;
             var layer    = old.Layer;
+
+            // Smart rotation: khi replace cross-definition (def khác nhau), new symbol có
+            // natural-up riêng — copy rotation từ old thường gây bị "ngược". Reset về 0
+            // để symbol mới hiện theo đúng orientation trong definition của nó.
+            // Same-definition replace (update cùng loại) → giữ rotation.
+            string oldDefName = null;
+            try { oldDefName = old.Definition?.Name; } catch { }
+            string newDefName = null;
+            try { newDefName = newDef?.Name; } catch { }
+            bool isCrossDef = !string.Equals(oldDefName ?? "", newDefName ?? "", StringComparison.OrdinalIgnoreCase);
+            if (isCrossDef)
+            {
+                Debug.WriteLine($"{LOG_PREFIX}   Cross-def replace ('{oldDefName}' → '{newDefName}'): reset rotation {rot:F3} → 0.");
+                rot = 0;
+            }
 
             // Bước 1a: Snapshot Leader (attachment + leader structure).
             // Probe đã xác nhận:
@@ -709,9 +731,9 @@ namespace MCGInventorPlugin.Services.SymbolHandler
             Debug.WriteLine($"{LOG_PREFIX}   Snapshot: pos=({posX:F3},{posY:F3}) rot={rot:F3} scale={scale:F3}" +
                             $" static={isStatic} hasLeader={leaderSnap.HasLeader} attrs={attrSnapshot.Count}");
 
-            // ── Bước 2: Resolve definition trong document hiện tại ──
+            // ── Bước 2: Đảm bảo definition tồn tại trong document hiện tại (AddByCopy nếu chưa) ──
             var doc = sheet.Parent as DrawingDocument;
-            var resolvedDef = ResolveDefinitionInDocument(doc, newDef);
+            var resolvedDef = EnsureDefinitionInDocument(doc, newDef);
             Debug.WriteLine($"{LOG_PREFIX}   Resolved definition: '{resolvedDef.Name}'");
 
             // ── Bước 3: Delete old instance ──
@@ -723,9 +745,38 @@ namespace MCGInventorPlugin.Services.SymbolHandler
             var freshPos = _app.TransientGeometry.CreatePoint2d(posX, posY);
 
             // ── Bước 5: Build PromptStrings + Insert ──
-            var promptStrings = BuildPromptStrings(resolvedDef, attrSnapshot);
-            var newSym = sheet.SketchedSymbols.Add(
-                resolvedDef, freshPos, rot, scale, promptStrings);
+            // Merge ưu tiên: promptValues (DataGrid) > attrSnapshot (từ old symbol).
+            // Key format phải khớp NEW def vì BuildPromptStrings iterate resolvedDef.Sketch.TextBoxes.
+            // attrSnapshot từ old có key theo OLD def → chỉ match khi same-def.
+            // promptValues có key theo NEW def (do DataGrid load từ new def) → luôn match.
+            var effectiveSnapshot = new Dictionary<string, string>(attrSnapshot, StringComparer.OrdinalIgnoreCase);
+            if (promptValues != null && promptValues.Count > 0)
+            {
+                try
+                {
+                    int tbIdx = 0;
+                    foreach (TextBox tb in resolvedDef.Sketch.TextBoxes)
+                    {
+                        if (promptValues.TryGetValue(tbIdx, out string val))
+                        {
+                            string key = $"tb_{tbIdx}_{(tb.Text?.Trim() ?? string.Empty)}";
+                            effectiveSnapshot[key] = val;
+                            Debug.WriteLine($"{LOG_PREFIX}   PromptValue override (Replace): TB[{tbIdx}] = '{val}'");
+                        }
+                        tbIdx++;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"{LOG_PREFIX}   LỖI merge promptValues: {ex.Message}");
+                }
+            }
+
+            // Dùng AddSymbolWithFallback để handle case old=0 fields → new=N fields:
+            //   - Thử Add với string[] từ BuildPromptStrings (default text của new def)
+            //   - Nếu fail (E_INVALIDARG) → retry Add với Type.Missing rồi SetPromptResultText thủ công
+            var promptStrings = BuildPromptStrings(resolvedDef, effectiveSnapshot);
+            var newSym = AddSymbolWithFallback(sheet, resolvedDef, freshPos, rot, scale, promptStrings);
             Debug.WriteLine($"{LOG_PREFIX}   Inserted: '{newSym.Name}'.");
 
             // ── Bước 6: Restore Static + SymbolClipping ──
@@ -772,7 +823,8 @@ namespace MCGInventorPlugin.Services.SymbolHandler
             }
 
             // ── Bước 9: Restore prompt text (fallback nếu BuildPromptStrings key không khớp) ──
-            RestorePromptText(newSym, attrSnapshot);
+            // Dùng effectiveSnapshot để promptValues từ DataGrid thắng snapshot từ old.
+            RestorePromptText(newSym, effectiveSnapshot);
         }
 
         // ─── Private: View attachment helpers ────────────────────────────────
@@ -986,34 +1038,127 @@ namespace MCGInventorPlugin.Services.SymbolHandler
         // ─── Private helpers ──────────────────────────────────────────────────
 
         /// <summary>
-        /// Tìm definition trong document hiện tại theo tên.
-        /// Nếu tìm thấy → trả về definition của document (tránh cross-doc reference).
-        /// Nếu không tìm thấy → trả về definition gốc từ library (Inventor sẽ auto-import).
+        /// Đảm bảo definition tồn tại trong active document.
+        ///   - Nếu đã có → trả về definition của document (tránh cross-doc reference)
+        ///   - Nếu chưa có → copy từ library vào active doc qua AddByCopy()
+        ///
+        /// Quan trọng: `sheet.SketchedSymbols.Add(libraryDef)` với def từ document KHÁC
+        /// → E_INVALIDARG. Phải import definition vào active doc trước.
         /// </summary>
-        private static SketchedSymbolDefinition ResolveDefinitionInDocument(
+        private SketchedSymbolDefinition EnsureDefinitionInDocument(
             DrawingDocument doc, SketchedSymbolDefinition libraryDef)
         {
-            if (doc == null) return libraryDef;
+            if (doc == null || libraryDef == null) return libraryDef;
 
+            // Bước 1: kiểm tra đã có trong active doc chưa
             try
             {
                 foreach (SketchedSymbolDefinition def in doc.SketchedSymbolDefinitions)
                 {
                     if (string.Equals(def.Name, libraryDef.Name, StringComparison.OrdinalIgnoreCase))
                     {
-                        Debug.WriteLine($"[SymbolReplaceService] ResolveDefinition: tìm thấy '{def.Name}' trong active doc.");
+                        Debug.WriteLine($"{LOG_PREFIX}   EnsureDefinition: '{def.Name}' đã có trong active doc.");
                         return def;
                     }
                 }
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"[SymbolReplaceService] ResolveDefinition LỖI: {ex.Message}");
+                Debug.WriteLine($"{LOG_PREFIX}   EnsureDefinition iterate LỖI: {ex.Message}");
             }
 
-            // Không có trong active doc → dùng library def (Inventor sẽ tự import)
-            Debug.WriteLine($"[SymbolReplaceService] ResolveDefinition: '{libraryDef.Name}' chưa có trong active doc, dùng library def.");
+            // Bước 2: chưa có → import từ library qua SketchedSymbolDefinition.CopyTo(doc).
+            // Method này xác nhận qua probe là API đúng trên Inventor 2023.
+            // Interop wrapper KHÔNG expose CopyTo → phải dùng COM late-binding.
+            try
+            {
+                var copied = libraryDef.GetType().InvokeMember(
+                    "CopyTo",
+                    System.Reflection.BindingFlags.InvokeMethod,
+                    null,
+                    libraryDef,
+                    new object[] { doc });
+                if (copied is SketchedSymbolDefinition def)
+                {
+                    Debug.WriteLine($"{LOG_PREFIX}   EnsureDefinition: CopyTo('{libraryDef.Name}') → '{def.Name}' THÀNH CÔNG.");
+                    return def;
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"{LOG_PREFIX}   EnsureDefinition: CopyTo FAIL: {ex.Message}");
+            }
+
+            // Fallback cuối: trả lại library def (Add có thể fail nhưng không crash)
+            Debug.WriteLine($"{LOG_PREFIX}   EnsureDefinition: CopyTo FAIL → fallback library def.");
             return libraryDef;
+        }
+
+        /// <summary>
+        /// Insert SketchedSymbol với cơ chế retry: nếu Add với string[] promptStrings fail
+        /// (ví dụ old=0 fields → new=N fields → E_INVALIDARG vì format kỳ cục),
+        /// thì retry Add với Type.Missing → SetPromptResultText thủ công từng field.
+        ///
+        /// Lợi ích: old symbol không có attribute vẫn replace được bằng new symbol có attribute;
+        /// new symbol được insert với default values từ definition, user có thể edit sau qua DataGrid.
+        /// </summary>
+        private SketchedSymbol AddSymbolWithFallback(
+            Sheet sheet, SketchedSymbolDefinition def,
+            Point2d pos, double rot, double scale, object promptStrings)
+        {
+            // Bước 1: thử path chính
+            try
+            {
+                var sym = sheet.SketchedSymbols.Add(def, pos, rot, scale, promptStrings);
+                Debug.WriteLine($"{LOG_PREFIX}   AddSymbolWithFallback: primary path OK.");
+                return sym;
+            }
+            catch (Exception ex1)
+            {
+                Debug.WriteLine($"{LOG_PREFIX}   AddSymbolWithFallback: primary FAIL ({ex1.Message}) → fallback.");
+            }
+
+            // Bước 2: fallback — Add với Type.Missing rồi set prompt values thủ công
+            var newSym = sheet.SketchedSymbols.Add(def, pos, rot, scale, Type.Missing);
+            Debug.WriteLine($"{LOG_PREFIX}   AddSymbolWithFallback: fallback Add(Type.Missing) OK.");
+
+            if (promptStrings is string[] values && values.Length > 0)
+            {
+                ApplyPromptValues(newSym, def, values);
+            }
+            return newSym;
+        }
+
+        /// <summary>
+        /// Set prompt values cho symbol đã insert qua SetPromptResultText.
+        /// Match theo thứ tự prompt fields (TextBox có ReadOnlyUniqueID) trong definition.
+        /// </summary>
+        private void ApplyPromptValues(SketchedSymbol sym, SketchedSymbolDefinition def, string[] values)
+        {
+            try
+            {
+                int tbIdx  = 0;
+                int arrIdx = 0;
+                foreach (TextBox tb in def.Sketch.TextBoxes)
+                {
+                    try
+                    {
+                        string fmt = tb.FormattedText ?? string.Empty;
+                        if (ExtractPromptUID(fmt) != null)
+                        {
+                            if (arrIdx < values.Length)
+                            {
+                                sym.SetPromptResultText(tb, values[arrIdx] ?? string.Empty);
+                                Debug.WriteLine($"{LOG_PREFIX}   ApplyPromptValues[{arrIdx}] TB[{tbIdx}] = '{values[arrIdx]}'");
+                            }
+                            arrIdx++;
+                        }
+                    }
+                    catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX}   ApplyPromptValues TB[{tbIdx}] LỖI: {ex.Message}"); }
+                    tbIdx++;
+                }
+            }
+            catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX}   ApplyPromptValues LỖI: {ex.Message}"); }
         }
 
         /// <summary>Collect tất cả SketchedSymbol instance matching definition trên sheet.</summary>

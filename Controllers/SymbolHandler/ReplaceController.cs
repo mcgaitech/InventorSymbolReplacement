@@ -201,13 +201,22 @@ namespace MCGInventorPlugin.Controllers.SymbolHandler
                 int newFieldCount = CountPromptFields(newDef);
                 bool fieldsDiffer = oldFieldCount != newFieldCount;
 
+                // Đọc prompt values từ DataGrid — ưu tiên hơn snapshot từ old symbol.
+                // Quan trọng cho case old=0 fields → new=N fields: old không có attribute
+                // để snapshot, user đã fill giá trị vào DataGrid của new symbol trước khi click Replace.
+                Dictionary<int, string> promptValues = GetPromptValuesFromPanel();
+
                 // Replace single
-                bool ok = _replaceService.ReplaceSingle(pickedSymbol, newDef);
+                bool ok = _replaceService.ReplaceSingle(pickedSymbol, newDef, promptValues);
                 if (ok)
                 {
                     if (fieldsDiffer)
-                        _panel?.SetStatusWarning(
-                            $"1 symbol replaced. Fields differ: old={oldFieldCount}, new={newFieldCount} — default values used for unmatched fields.");
+                    {
+                        string msg = (oldFieldCount == 0)
+                            ? $"1 symbol replaced. New symbol has {newFieldCount} attribute(s) — click it to edit values."
+                            : $"1 symbol replaced. Fields differ: old={oldFieldCount}, new={newFieldCount} — default values used for unmatched fields.";
+                        _panel?.SetStatusWarning(msg);
+                    }
                     else
                         _panel?.SetStatusSuccess(1);
                 }
@@ -306,17 +315,10 @@ namespace MCGInventorPlugin.Controllers.SymbolHandler
                             $" static={isStatic} clipping={symbolClipping} leader={leaderEnabled} leaderVis={leaderVisible}");
 
             // Đọc prompt values từ DataGrid (nếu user đã edit)
-            Dictionary<int, string> promptValues = null;
-            var fields = _panel?.GetPromptFields();
-            if (fields != null && fields.Count > 0)
-            {
-                promptValues = new Dictionary<int, string>();
-                foreach (var f in fields)
-                    promptValues[f.TextBoxIndex] = f.Value ?? string.Empty;
-            }
+            Dictionary<int, string> promptValues = GetPromptValuesFromPanel();
 
-            var resolvedDef = ResolveDefinitionInDocument(doc, newDef);
-            bool ok = _replaceService.InsertSymbol(sheet, resolvedDef, args.Position,
+            // Service tự ensure definition có trong active doc (AddByCopy nếu cần)
+            bool ok = _replaceService.InsertSymbol(sheet, newDef, args.Position,
                                                    rotation, scale, args.PickedGeometry,
                                                    isStatic, symbolClipping,
                                                    leaderEnabled, leaderVisible,
@@ -369,7 +371,8 @@ namespace MCGInventorPlugin.Controllers.SymbolHandler
             }
 
             bool fieldsDiffer = CountPromptFields(oldDef) != CountPromptFields(newDef);
-            int count = _replaceService.ReplaceAllOnSheet(sheet, oldDef, newDef);
+            Dictionary<int, string> promptValues = GetPromptValuesFromPanel();
+            int count = _replaceService.ReplaceAllOnSheet(sheet, oldDef, newDef, promptValues);
             if (count > 0)
             {
                 if (fieldsDiffer)
@@ -427,7 +430,8 @@ namespace MCGInventorPlugin.Controllers.SymbolHandler
             }
 
             bool fieldsDiffer = CountPromptFields(oldDef) != CountPromptFields(newDef);
-            int replaced = _replaceService.ReplaceAllInDocument(doc, oldDef, newDef);
+            Dictionary<int, string> promptValues = GetPromptValuesFromPanel();
+            int replaced = _replaceService.ReplaceAllInDocument(doc, oldDef, newDef, promptValues);
             if (replaced > 0)
             {
                 if (fieldsDiffer)
@@ -481,24 +485,6 @@ namespace MCGInventorPlugin.Controllers.SymbolHandler
             _panel.ReplaceAllAllSheetsRequested    -= OnReplaceAllAllSheetsRequested;
             _panel.InsertRequested                 -= OnInsertRequested;
             _panel = null;
-        }
-
-        /// <summary>
-        /// Tìm definition cùng tên trong active document.
-        /// Tránh cross-document reference gây E_INVALIDARG.
-        /// </summary>
-        private static SketchedSymbolDefinition ResolveDefinitionInDocument(
-            DrawingDocument doc, SketchedSymbolDefinition libraryDef)
-        {
-            if (doc == null) return libraryDef;
-            try
-            {
-                foreach (SketchedSymbolDefinition def in doc.SketchedSymbolDefinitions)
-                    if (string.Equals(def.Name, libraryDef.Name, StringComparison.OrdinalIgnoreCase))
-                        return def;
-            }
-            catch { }
-            return libraryDef;
         }
 
         // ─── Nested enum ──────────────────────────────────────────────────────
@@ -598,6 +584,21 @@ namespace MCGInventorPlugin.Controllers.SymbolHandler
             }
 
             return fields;
+        }
+
+        /// <summary>
+        /// Đọc prompt values từ DataGrid trong Properties panel.
+        /// Trả null nếu panel không có field nào (old=non-attribute → snapshot rỗng → giữ default từ def mới).
+        /// </summary>
+        private Dictionary<int, string> GetPromptValuesFromPanel()
+        {
+            var fields = _panel?.GetPromptFields();
+            if (fields == null || fields.Count == 0) return null;
+
+            var result = new Dictionary<int, string>();
+            foreach (var f in fields)
+                result[f.TextBoxIndex] = f.Value ?? string.Empty;
+            return result;
         }
 
         /// <summary>Đếm số prompt fields (TextBox có ReadOnlyUniqueID) trong definition.</summary>

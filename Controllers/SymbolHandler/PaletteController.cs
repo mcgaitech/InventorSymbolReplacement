@@ -35,6 +35,11 @@ namespace MCGInventorPlugin.Controllers.SymbolHandler
         // Document được scan lần cuối — dùng để clear SelectSet khi Clear Highlight
         private DrawingDocument             _lastScannedDoc;
 
+        // SelectionListener để theo dõi symbol được pick trên drawing (cho chức năng Select Similar)
+        private SelectionListener          _selectionListener;
+        // Def của symbol vừa được pick trên drawing. null khi user click vùng trống.
+        private SketchedSymbolDefinition   _lastPickedDef;
+
         // ─── Public: selected symbol ──────────────────────────────────────────
         public SymbolDefinitionModel SelectedSymbol
             => _panel?.SymbolGrid?.SelectedItem;
@@ -72,10 +77,33 @@ namespace MCGInventorPlugin.Controllers.SymbolHandler
                 _panel.SearchQueryChanged         += OnSearchQueryChanged;
                 _panel.ScanSheetRequested         += OnScanSheetRequested;
                 _panel.ClearHighlightRequested    += OnClearHighlightRequested;
+                _panel.SelectSimilarRequested     += OnSelectSimilarRequested;
                 _panel.LocalSourceRequested       += OnLocalSourceRequested;
                 _panel.ViewModeChanged            += OnViewModeChanged;
                 _panel.SymbolGrid.SelectionChanged += OnSymbolSelectionChanged;
                 Debug.WriteLine($"{LOG_PREFIX} Đã attach panel.");
+            }
+        }
+
+        /// <summary>
+        /// Gán SelectionListener để theo dõi symbol được pick trên drawing.
+        /// Gọi sau SetPanel() — enable chức năng Select Similar.
+        /// </summary>
+        public void AttachSelectionListener(SelectionListener listener)
+        {
+            if (_selectionListener != null)
+            {
+                _selectionListener.SymbolSelected    -= OnDrawingSymbolSelected;
+                _selectionListener.NonSymbolSelected -= OnDrawingNonSymbolSelected;
+            }
+
+            _selectionListener = listener;
+
+            if (_selectionListener != null)
+            {
+                _selectionListener.SymbolSelected    += OnDrawingSymbolSelected;
+                _selectionListener.NonSymbolSelected += OnDrawingNonSymbolSelected;
+                Debug.WriteLine($"{LOG_PREFIX} Đã attach SelectionListener.");
             }
         }
 
@@ -307,8 +335,26 @@ namespace MCGInventorPlugin.Controllers.SymbolHandler
                 Debug.WriteLine($"{LOG_PREFIX} LỖI SelectSet: {ex.Message}");
             }
 
+            // Group theo definition name để hiện breakdown
+            var groups = nonPalette
+                .GroupBy(s =>
+                {
+                    try { return s.Definition?.Name ?? "(unknown)"; }
+                    catch { return "(unknown)"; }
+                }, StringComparer.OrdinalIgnoreCase)
+                .OrderByDescending(g => g.Count())
+                .ToList();
+
+            // Format: "Name1 (3), Name2 (2), Name3 (1)" — truncate nếu quá nhiều loại
+            const int MAX_GROUPS_SHOWN = 8;
+            var shownParts = groups.Take(MAX_GROUPS_SHOWN)
+                .Select(g => $"{g.Key} ({g.Count()})");
+            string breakdown = string.Join(", ", shownParts);
+            if (groups.Count > MAX_GROUPS_SHOWN)
+                breakdown += $", …and {groups.Count - MAX_GROUPS_SHOWN} more";
+
             _panel?.SetStatusWarning(
-                $"{nonPalette.Count} of {total} symbols NOT in palette (highlighted)");
+                $"{nonPalette.Count}/{total} NOT in palette ({groups.Count} type(s)): {breakdown}");
             _panel?.SetHighlightActive(true);
         }
 
@@ -491,14 +537,139 @@ namespace MCGInventorPlugin.Controllers.SymbolHandler
             _panel.SearchQueryChanged         -= OnSearchQueryChanged;
             _panel.ScanSheetRequested         -= OnScanSheetRequested;
             _panel.ClearHighlightRequested    -= OnClearHighlightRequested;
+            _panel.SelectSimilarRequested     -= OnSelectSimilarRequested;
             _panel.LocalSourceRequested       -= OnLocalSourceRequested;
             _panel.ViewModeChanged            -= OnViewModeChanged;
 
             if (_panel.SymbolGrid != null)
                 _panel.SymbolGrid.SelectionChanged -= OnSymbolSelectionChanged;
 
+            if (_selectionListener != null)
+            {
+                _selectionListener.SymbolSelected    -= OnDrawingSymbolSelected;
+                _selectionListener.NonSymbolSelected -= OnDrawingNonSymbolSelected;
+                _selectionListener = null;
+            }
+
             _panel = null;
+            _lastPickedDef = null;
             Debug.WriteLine($"{LOG_PREFIX} Đã detach panel.");
+        }
+
+        // ─── Event handlers: Drawing selection (cho Select Similar) ──────────
+
+        private void OnDrawingSymbolSelected(object sender, SketchedSymbol sym)
+        {
+            try { _lastPickedDef = sym?.Definition; } catch { _lastPickedDef = null; }
+            _panel?.SetSelectSimilarEnabled(_lastPickedDef != null);
+            Debug.WriteLine($"{LOG_PREFIX} DrawingSymbolSelected: def='{_lastPickedDef?.Name}'");
+        }
+
+        private void OnDrawingNonSymbolSelected(object sender, EventArgs e)
+        {
+            _lastPickedDef = null;
+            _panel?.SetSelectSimilarEnabled(false);
+        }
+
+        private void OnSelectSimilarRequested(object sender, EventArgs e)
+        {
+            Debug.WriteLine($"{LOG_PREFIX} SelectSimilarRequested.");
+
+            if (_lastPickedDef == null)
+            {
+                _panel?.SetStatusError("Pick a symbol on the drawing first.");
+                return;
+            }
+
+            var doc = _app.ActiveDocument as DrawingDocument;
+            if (doc == null)
+            {
+                _panel?.SetStatusError("No active Drawing document.");
+                return;
+            }
+
+            var sheet = doc.ActiveSheet;
+            if (sheet == null)
+            {
+                _panel?.SetStatusError("No active sheet.");
+                return;
+            }
+
+            string targetName = "";
+            try { targetName = _lastPickedDef.Name ?? ""; } catch { }
+
+            // Collect matching instances on active sheet (so sánh theo definition reference + fallback name)
+            var matches = new List<SketchedSymbol>();
+            int total = 0;
+            try
+            {
+                foreach (SketchedSymbol sym in sheet.SketchedSymbols)
+                {
+                    total++;
+                    bool isMatch = false;
+                    try
+                    {
+                        // So sánh reference trước — đúng nhất
+                        if (sym.Definition == _lastPickedDef) isMatch = true;
+                    }
+                    catch { }
+
+                    // Fallback: so sánh theo tên (trường hợp COM reference không match do wrapper)
+                    if (!isMatch)
+                    {
+                        try
+                        {
+                            string n = sym.Definition?.Name ?? "";
+                            if (!string.IsNullOrEmpty(n) &&
+                                string.Equals(n, targetName, StringComparison.OrdinalIgnoreCase))
+                                isMatch = true;
+                        }
+                        catch { }
+                    }
+
+                    if (isMatch) matches.Add(sym);
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"{LOG_PREFIX} LỖI iterate SketchedSymbols: {ex.Message}");
+                _panel?.SetStatusError($"Select Similar error: {ex.Message}");
+                return;
+            }
+
+            Debug.WriteLine($"{LOG_PREFIX} SelectSimilar: {matches.Count}/{total} match '{targetName}'.");
+
+            if (matches.Count == 0)
+            {
+                _panel?.SetStatusInfo($"No instances of '{targetName}' on sheet.");
+                _panel?.SetHighlightActive(false);
+                return;
+            }
+
+            // Highlight qua SelectSet
+            try
+            {
+                doc.SelectSet.Clear();
+                int added = 0;
+                foreach (var sym in matches)
+                {
+                    try { doc.SelectSet.Select(sym); added++; }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"{LOG_PREFIX} SelectSet.Select failed: {ex.Message}");
+                    }
+                }
+                _lastScannedDoc = doc;
+                Debug.WriteLine($"{LOG_PREFIX} SelectSet: {added}/{matches.Count} symbols selected.");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"{LOG_PREFIX} LỖI SelectSet: {ex.Message}");
+            }
+
+            _panel?.SetStatusWarning(
+                $"{matches.Count}/{total} match '{targetName}' (highlighted on sheet)");
+            _panel?.SetHighlightActive(true);
         }
     }
 }

@@ -76,6 +76,7 @@ namespace MCGInventorPlugin.Modules
                 }
 
                 _paletteController.SetPanel(panel);
+                _paletteController.AttachSelectionListener(_selectionListener);
                 _paletteController.Initialize();
                 _replaceController.SetPanel(panel);
                 _selectionListener.Start();

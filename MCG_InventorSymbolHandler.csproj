@@ -5,7 +5,7 @@
     <TargetFramework>net48</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms>
     <UseWPF>true</UseWPF>
-    <AssemblyName>MCGInventorPlugin</AssemblyName>
+    <AssemblyName>MCG_InventorSymbolHandler</AssemblyName>
     <RootNamespace>MCGInventorPlugin</RootNamespace>
     <PlatformTarget>x64</PlatformTarget>
     <Platforms>x64</Platforms>
@@ -71,6 +71,9 @@
                       Condition="Exists('Resources\SymbolHandler\ReplaceSymbol_32.png')" />
     <EmbeddedResource Include="Resources\SymbolHandler\ReplaceSymbol_16.png"
                       Condition="Exists('Resources\SymbolHandler\ReplaceSymbol_16.png')" />
+    <!-- User guide — extract ra temp khi user click Help button -->
+    <EmbeddedResource Include="Resources\SymbolHandler\Help.html"
+                      Condition="Exists('Resources\SymbolHandler\Help.html')" />
   </ItemGroup>
 
   <!--
@@ -80,9 +83,13 @@
     ══════════════════════════════════════════════════════════
   -->
 
-  <!-- Thư mục Addins đích — định nghĩa 1 lần dùng nhiều chỗ -->
+  <!-- Deploy targets:
+       - .addin file → %APPDATA%\Autodesk\Inventor 2023\Addins\ (Inventor quét folder này)
+       - .dll file   → C:\CustomTools\Inventor\ (theo <Assembly> trong .addin)
+  -->
   <PropertyGroup>
     <AddinsTargetDir>$(AppData)\Autodesk\Inventor 2023\Addins\</AddinsTargetDir>
+    <DllTargetDir>C:\CustomTools\Inventor\</DllTargetDir>
   </PropertyGroup>
 
   <!-- Đường dẫn đến RegAsm.exe 64-bit (.NET 4.8) -->
@@ -92,27 +99,31 @@
 
   <Target Name="DeployToInventor" AfterTargets="Build">
 
-    <!-- Bước 1: Tạo thư mục Addins nếu chưa tồn tại -->
+    <!-- Bước 1: Tạo các thư mục đích nếu chưa tồn tại -->
     <MakeDir Directories="$(AddinsTargetDir)" />
+    <MakeDir Directories="$(DllTargetDir)" />
 
-    <!-- Bước 2: Copy file .addin (cấu hình đăng ký addin với Inventor) -->
+    <!-- Bước 2: Cleanup file cũ với tên MCGInventorPlugin.* (nếu có từ build trước) -->
+    <Delete Files="$(AddinsTargetDir)MCGInventorPlugin.addin" ContinueOnError="true" />
+    <Delete Files="$(AddinsTargetDir)MCGInventorPlugin.dll"   ContinueOnError="true" />
+    <Delete Files="$(AddinsTargetDir)MCGInventorPlugin.pdb"   ContinueOnError="true" />
+
+    <!-- Bước 3: Copy file .addin → Addins folder -->
     <Copy
-      SourceFiles="$(ProjectDir)MCGInventorPlugin.addin"
+      SourceFiles="$(ProjectDir)MCG_InventorSymbolHandler.addin"
       DestinationFolder="$(AddinsTargetDir)"
       OverwriteReadOnlyFiles="true"
       ContinueOnError="true" />
 
-    <!-- Bước 3: Copy file .dll chính (assembly của addin) -->
+    <!-- Bước 4: Copy .dll + .pdb → DllTargetDir (C:\CustomTools\Inventor\) -->
     <Copy
       SourceFiles="$(OutputPath)$(AssemblyName).dll"
-      DestinationFolder="$(AddinsTargetDir)"
+      DestinationFolder="$(DllTargetDir)"
       OverwriteReadOnlyFiles="true"
       ContinueOnError="true" />
-
-    <!-- Bước 4: Copy file .pdb để debug (symbol file cho stack trace) -->
     <Copy
       SourceFiles="$(OutputPath)$(AssemblyName).pdb"
-      DestinationFolder="$(AddinsTargetDir)"
+      DestinationFolder="$(DllTargetDir)"
       OverwriteReadOnlyFiles="true"
       ContinueOnError="true"
       Condition="Exists('$(OutputPath)$(AssemblyName).pdb')" />
@@ -121,17 +132,21 @@
       Bước 5: COM Registration — BẮT BUỘC để Inventor có thể load addin.
       Inventor dùng CLSID trong Windows registry để instantiate ApplicationAddInServer.
       /codebase: ghi đường dẫn DLL vào registry (không cần strong name).
+      Registry sẽ trỏ về DLL tại $(DllTargetDir) — cần chạy lại nếu đường dẫn này đổi.
       Cần chạy với quyền Administrator lần đầu.
     -->
     <Exec
-      Command="&quot;$(RegAsmExe)&quot; &quot;$(AddinsTargetDir)$(AssemblyName).dll&quot; /codebase /nologo"
+      Command="&quot;$(RegAsmExe)&quot; &quot;$(DllTargetDir)$(AssemblyName).dll&quot; /codebase /nologo"
       ContinueOnError="true"
       ConsoleToMSBuild="true"
       Condition="Exists('$(RegAsmExe)')" />
 
     <!-- Log kết quả deploy -->
     <Message
-      Text="[Deploy] ✓ Đã copy DLL + .addin → $(AddinsTargetDir)"
+      Text="[Deploy] ✓ .addin → $(AddinsTargetDir)"
+      Importance="high" />
+    <Message
+      Text="[Deploy] ✓ .dll → $(DllTargetDir)"
       Importance="high" />
     <Message
       Text="[Deploy] ✓ COM registration hoàn tất (RegAsm /codebase)"
