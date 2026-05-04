@@ -1,0 +1,825 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MCG Symbol Handler — Instructions</title>
+<style>
+  :root {
+    --accent:      #0078D4;
+    --accent-dark: #005A9E;
+    --bg:          #FFFFFF;
+    --surface:     #F3F6FA;
+    --surface2:    #E8EFF8;
+    --border:      #D0D7DE;
+    --text:        #1A1A2E;
+    --muted:       #5A6478;
+    --green:       #1B7F3A;
+    --green-bg:    #EAF6ED;
+    --warn:        #7D4E00;
+    --warn-bg:     #FFF8E1;
+    --note-bg:     #EBF3FF;
+    --code-bg:     #EEF1F5;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    font-size: 14px;
+    line-height: 1.65;
+    color: var(--text);
+    background: var(--bg);
+  }
+
+  /* ── Layout ── */
+  .layout { display: flex; min-height: 100vh; }
+
+  nav {
+    width: 230px;
+    min-width: 210px;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    padding: 20px 0 32px;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+    flex-shrink: 0;
+  }
+  nav .brand {
+    padding: 0 16px 16px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 10px;
+  }
+  nav .brand-title { font-size: 13px; font-weight: 700; color: var(--accent); display: block; }
+  nav .brand-sub   { font-size: 11px; color: var(--muted); margin-top: 2px; display: block; }
+  nav ul { list-style: none; padding: 0 6px; }
+  nav li { margin: 1px 0; }
+  nav a {
+    display: block;
+    padding: 5px 12px;
+    color: var(--text);
+    text-decoration: none;
+    border-radius: 4px;
+    font-size: 13px;
+  }
+  nav a:hover { background: var(--surface2); color: var(--accent); }
+  nav .nav-group {
+    font-size: 14px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #E8590C;
+    padding: 16px 12px 6px;
+    margin-top: 4px;
+    border-bottom: 1.5px solid #FFB84D;
+  }
+  nav a.sub { padding-left: 22px; color: var(--muted); font-size: 12.5px; }
+  nav a.sub:hover { color: var(--accent); }
+
+  main {
+    flex: 1;
+    padding: 36px 52px 72px 44px;
+    max-width: 880px;
+  }
+
+  /* ── Typography ── */
+  h1 { font-size: 26px; color: var(--accent); border-bottom: 2px solid var(--accent); padding-bottom: 10px; margin-bottom: 6px; }
+  .subtitle { color: var(--muted); font-size: 13px; margin-bottom: 32px; }
+  h2 { font-size: 17px; margin: 40px 0 12px; padding: 7px 12px; background: var(--surface); border-left: 3px solid var(--accent); border-radius: 2px; scroll-margin-top: 20px; }
+  h3 { font-size: 14.5px; margin: 22px 0 8px; color: var(--muted); scroll-margin-top: 20px; }
+  p  { margin: 6px 0 12px; }
+  ul, ol { padding-left: 22px; margin: 6px 0 14px; }
+  li { margin: 4px 0; }
+
+  code {
+    font-family: Consolas, 'SF Mono', monospace;
+    font-size: 12px;
+    background: var(--code-bg);
+    padding: 1px 6px;
+    border-radius: 3px;
+  }
+  kbd {
+    font-family: Consolas, monospace;
+    font-size: 11.5px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-bottom-width: 2px;
+    padding: 1px 6px;
+    border-radius: 3px;
+  }
+  .btn {
+    display: inline-block;
+    padding: 2px 8px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    font-size: 12.5px;
+  }
+  .btn-primary {
+    background: var(--accent);
+    border-color: var(--accent-dark);
+    color: white;
+  }
+
+  /* ── Callouts ── */
+  .tip, .note, .warn {
+    padding: 9px 14px;
+    margin: 12px 0;
+    border-radius: 3px;
+    font-size: 13px;
+    line-height: 1.55;
+  }
+  .tip  { background: var(--green-bg); border-left: 3px solid #2E7D32; color: var(--green); }
+  .note { background: var(--note-bg);  border-left: 3px solid var(--accent); color: #1a4080; }
+  .warn { background: var(--warn-bg);  border-left: 3px solid #F9A825; color: var(--warn); }
+
+  /* ── Tables ── */
+  table { border-collapse: collapse; width: 100%; margin: 10px 0 16px; font-size: 13px; }
+  th, td { border: 1px solid var(--border); padding: 7px 10px; text-align: left; vertical-align: top; }
+  th { background: var(--surface); font-weight: 600; }
+  tr:nth-child(even) td { background: #FAFBFC; }
+
+  /* ── Step list ── */
+  .steps { list-style: none; padding: 0; counter-reset: step; margin: 10px 0 16px; }
+  .steps > li {
+    counter-increment: step;
+    display: flex;
+    gap: 12px;
+    margin: 8px 0;
+    align-items: flex-start;
+  }
+  .steps > li::before {
+    content: counter(step);
+    flex-shrink: 0;
+    width: 24px; height: 24px;
+    background: var(--accent);
+    color: white;
+    border-radius: 50%;
+    font-size: 12px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: 2px;
+  }
+
+  /* ══════════════════════════════════════════════════════════
+     OVERVIEW WORKFLOW
+  ══════════════════════════════════════════════════════════ */
+  .workflow {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    margin: 24px 0 8px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+  .wf-step {
+    flex: 1;
+    min-width: 110px;
+    background: white;
+    border: 1.5px solid var(--border);
+    border-radius: 6px;
+    padding: 14px 10px 12px;
+    text-align: center;
+    text-decoration: none;
+    color: var(--text);
+    position: relative;
+    transition: box-shadow 0.15s, border-color 0.15s;
+    cursor: pointer;
+  }
+  .wf-step:hover {
+    border-color: var(--accent);
+    box-shadow: 0 2px 8px rgba(0,120,212,0.15);
+    color: var(--accent);
+  }
+  .wf-arrow {
+    display: flex;
+    align-items: center;
+    padding: 0 4px;
+    color: var(--muted);
+    font-size: 18px;
+    flex-shrink: 0;
+  }
+  .wf-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px; height: 22px;
+    background: var(--accent);
+    color: white;
+    border-radius: 50%;
+    font-size: 11px;
+    font-weight: 700;
+    margin: 0 auto 6px;
+  }
+  .wf-icon { font-size: 22px; display: block; margin-bottom: 4px; }
+  .wf-label { font-size: 12px; font-weight: 600; display: block; line-height: 1.3; }
+  .wf-desc  { font-size: 11px; color: var(--muted); margin-top: 4px; display: block; line-height: 1.3; }
+
+  /* ── Feature cards (overview detail rows) ── */
+  .feature-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin: 16px 0 24px;
+  }
+  .feature-card {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px 16px;
+    text-decoration: none;
+    color: var(--text);
+    background: white;
+    transition: box-shadow 0.15s, border-color 0.15s;
+    display: block;
+  }
+  .feature-card:hover { border-color: var(--accent); box-shadow: 0 2px 8px rgba(0,120,212,0.12); }
+  .feature-card .fc-icon  { font-size: 20px; display: block; margin-bottom: 6px; }
+  .feature-card .fc-title { font-size: 13.5px; font-weight: 700; color: var(--accent); display: block; margin-bottom: 4px; }
+  .feature-card .fc-desc  { font-size: 12.5px; color: var(--muted); line-height: 1.45; }
+
+  /* ── File tree ── */
+  .tree {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 12px 16px;
+    font-family: Consolas, monospace;
+    font-size: 12.5px;
+    line-height: 1.9;
+    margin: 10px 0 14px;
+  }
+  .tree .dir  { color: var(--accent); font-weight: 600; }
+  .tree .cmt  { color: var(--muted); }
+
+  footer {
+    margin-top: 56px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--muted);
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+
+<!-- ════════════ SIDEBAR ════════════ -->
+<nav>
+  <div class="brand">
+    <span class="brand-title">Symbol Handler</span>
+    <span class="brand-sub">MCG Inventor Add-In · v1.0.0</span>
+  </div>
+  <ul>
+    <li><span class="nav-group">Getting Started</span></li>
+    <li><a href="#requirements">System Requirements</a></li>
+    <li><a href="#install">Installation</a></li>
+    <li><a href="#open-panel">Opening the Panel</a></li>
+
+    <li><span class="nav-group">Overview</span></li>
+    <li><a href="#workflow">Workflow at a Glance</a></li>
+    <li><a href="#features">Feature Map</a></li>
+
+    <li><span class="nav-group">Panel</span></li>
+    <li><a href="#source">Source</a></li>
+    <li><a href="#symbol-list">Symbol List</a></li>
+    <li><a href="#properties">Properties</a></li>
+    <li><a href="#attributes">Attributes</a></li>
+
+    <li><span class="nav-group">Features</span></li>
+    <li><a href="#insert">Insert Symbol</a></li>
+    <li><a href="#replace">Replace (Single)</a></li>
+    <li><a href="#replace-all">Replace All</a></li>
+    <li><a href="#edit-attrs">Edit Attributes In-Place</a></li>
+    <li><a href="#scan">Scan Sheet</a></li>
+    <li><a href="#select-similar">Select Similar</a></li>
+
+    <li><span class="nav-group">Reference</span></li>
+    <li><a href="#preserve">What Is Preserved</a></li>
+    <li><a href="#keyboard">Keyboard &amp; Mouse</a></li>
+    <li><a href="#tips">Troubleshooting</a></li>
+  </ul>
+</nav>
+
+<!-- ════════════ MAIN ════════════ -->
+<main>
+
+<h1>MCG Symbol Handler</h1>
+<p class="subtitle">Autodesk Inventor 2023 · Drawing Add-In · v1.0.0</p>
+
+<p>
+  <strong>Symbol Handler</strong> is a palette tool for Autodesk Inventor 2023 that lets you
+  <strong>insert</strong>, <strong>replace</strong> and <strong>manage Sketched Symbols</strong>
+  in drawing documents (.idw). Open it from the <strong>MCG TOOLS</strong> tab in the Drawing environment.
+</p>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     SYSTEM REQUIREMENTS
+══════════════════════════════════════════════════════════ -->
+<h2 id="requirements">System Requirements</h2>
+<table>
+  <tr><th style="width:180px">Component</th><th>Required</th></tr>
+  <tr><td>Autodesk Inventor</td><td>2023 (version 27.x or later)</td></tr>
+  <tr><td>Operating System</td><td>Windows 10 / 11 (64-bit)</td></tr>
+  <tr><td>.NET Framework</td><td>4.8 (pre-installed on Windows 10 v1903+)</td></tr>
+  <tr><td>Administrator rights</td><td>Not required</td></tr>
+</table>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     INSTALLATION
+══════════════════════════════════════════════════════════ -->
+<h2 id="install">Installation</h2>
+
+<h3>Package contents</h3>
+<div class="tree">
+  <span class="dir">MCG_InventorSymbolHandler_v1.0.0/</span><br>
+  &nbsp;&nbsp;├─ <span class="file">MCG_InventorSymbolHandler.dll</span>      <span class="cmt">← add-in library</span><br>
+  &nbsp;&nbsp;├─ <span class="file">MCG_InventorSymbolHandler.addin</span>     <span class="cmt">← Inventor descriptor</span><br>
+  &nbsp;&nbsp;├─ <span class="file">Install_AutoLoadInventorAddin.bat</span>   <span class="cmt">← installer script</span><br>
+  &nbsp;&nbsp;└─ <span class="file">Instructions.html</span>                   <span class="cmt">← this file</span>
+</div>
+
+<h3>Steps</h3>
+<ol class="steps">
+  <li>
+    <div>
+      <strong>Close Autodesk Inventor</strong> if it is currently running.
+    </div>
+  </li>
+  <li>
+    <div>
+      <strong>Copy all three files</strong> below into <code>C:\CustomTools\Inventor\</code>
+      (create the folder if it does not exist):
+      <ul>
+        <li><code>MCG_InventorSymbolHandler.dll</code></li>
+        <li><code>MCG_InventorSymbolHandler.addin</code></li>
+        <li><code>Install_AutoLoadInventorAddin.bat</code></li>
+      </ul>
+    </div>
+  </li>
+  <li>
+    <div>
+      <strong>Run <code>Install_AutoLoadInventorAddin.bat</code></strong>
+      (double-click it inside <code>C:\CustomTools\Inventor\</code>).<br>
+      The script scans the folder for <code>*.addin</code> files and copies them into
+      <code>%APPDATA%\Autodesk\Inventor 2023\Addins\</code> so Inventor will discover the add-in on startup.
+      Press any key to close the script window when it shows <em>Success</em>.
+    </div>
+  </li>
+  <li>
+    <div>
+      <strong>Open Autodesk Inventor 2023</strong> and open any <strong>Drawing (.idw)</strong> file.
+    </div>
+  </li>
+  <li>
+    <div>
+      <strong>Verify the add-in loaded</strong>:
+      <ul>
+        <li>Look for the <strong>MCG TOOLS</strong> tab in the ribbon, or</li>
+        <li>Go to <em>Tools → Add-In Manager</em> and confirm <strong>MCG_InventorSymbolHandler</strong> is listed and ticked as Loaded.</li>
+      </ul>
+      If the tab does not appear, see <a href="#tips">Troubleshooting</a>.
+    </div>
+  </li>
+</ol>
+
+<div class="tip">
+  <strong>Adding more add-ins later:</strong> the same <code>Install_AutoLoadInventorAddin.bat</code>
+  script works for any number of add-ins — drop more <code>*.addin</code> files into
+  <code>C:\CustomTools\Inventor\</code> and run the script again.
+</div>
+
+<div class="note">
+  <strong>Uninstall:</strong> close Inventor, then delete
+  <code>MCG_InventorSymbolHandler.dll</code> from <code>C:\CustomTools\Inventor\</code>
+  and <code>MCG_InventorSymbolHandler.addin</code> from
+  <code>%APPDATA%\Autodesk\Inventor 2023\Addins\</code>.
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     OPENING THE PANEL
+══════════════════════════════════════════════════════════ -->
+<h2 id="open-panel">Opening the Panel</h2>
+<ol class="steps">
+  <li><div>Open a <strong>Drawing (.idw)</strong> file in Inventor 2023.</div></li>
+  <li><div>Click the <strong>MCG TOOLS</strong> tab in the ribbon.</div></li>
+  <li><div>In the <strong>Drawing</strong> panel, click <strong>Symbol Handler</strong>.</div></li>
+  <li><div>The Symbol Handler palette opens and docks to the side of the screen.</div></li>
+</ol>
+
+<div class="note">
+  The add-in is only active in the <strong>Drawing environment</strong>. The MCG TOOLS tab will not appear when an Assembly or Part document is open.
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     WORKFLOW OVERVIEW
+══════════════════════════════════════════════════════════ -->
+<h2 id="workflow">Workflow at a Glance</h2>
+<p>
+  The typical usage follows this sequence. Click any step to jump to its detailed section.
+</p>
+
+<div class="workflow">
+
+  <a class="wf-step" href="#source">
+    <span class="wf-num">1</span>
+    <span class="wf-icon">📂</span>
+    <span class="wf-label">Set Source</span>
+    <span class="wf-desc">Load a library file or use symbols from the active drawing</span>
+  </a>
+
+  <div class="wf-arrow">›</div>
+
+  <a class="wf-step" href="#symbol-list">
+    <span class="wf-num">2</span>
+    <span class="wf-icon">🔎</span>
+    <span class="wf-label">Find Symbol</span>
+    <span class="wf-desc">Search or browse the symbol list</span>
+  </a>
+
+  <div class="wf-arrow">›</div>
+
+  <a class="wf-step" href="#properties">
+    <span class="wf-num">3</span>
+    <span class="wf-icon">⚙️</span>
+    <span class="wf-label">Set Properties</span>
+    <span class="wf-desc">Scale, rotate, leader options &amp; attribute values</span>
+  </a>
+
+  <div class="wf-arrow">›</div>
+
+  <a class="wf-step" href="#insert">
+    <span class="wf-num">4a</span>
+    <span class="wf-icon">➕</span>
+    <span class="wf-label">Insert</span>
+    <span class="wf-desc">Place a new symbol on the drawing</span>
+  </a>
+
+  <div class="wf-arrow" style="color:#ccc;">│</div>
+
+  <a class="wf-step" href="#replace">
+    <span class="wf-num">4b</span>
+    <span class="wf-icon">🔄</span>
+    <span class="wf-label">Replace</span>
+    <span class="wf-desc">Swap existing symbol(s) with the selected definition</span>
+  </a>
+
+</div>
+
+<p style="font-size:12.5px;color:var(--muted);margin-top:4px;">
+  Steps 4a and 4b are independent — use Insert to add new symbols, Replace to update existing ones.
+</p>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     FEATURE MAP
+══════════════════════════════════════════════════════════ -->
+<h2 id="features">Feature Map</h2>
+<p>All features available in the palette — click any card to read the full details.</p>
+
+<div class="feature-grid">
+
+  <a class="feature-card" href="#insert">
+    <span class="fc-icon">➕</span>
+    <span class="fc-title">Insert Symbol</span>
+    <span class="fc-desc">
+      Place a symbol on the drawing. Attach it to an edge or sketch line with a leader,
+      or drop it as a floating annotation. Runs in continuous mode — press Esc to exit.
+    </span>
+  </a>
+
+  <a class="feature-card" href="#replace">
+    <span class="fc-icon">🔄</span>
+    <span class="fc-title">Replace (Single)</span>
+    <span class="fc-desc">
+      Pick an existing symbol on the drawing and swap its definition with the one
+      selected in the palette. Position, scale, leader and attributes are preserved.
+    </span>
+  </a>
+
+  <a class="feature-card" href="#replace-all">
+    <span class="fc-icon">⏩</span>
+    <span class="fc-title">Replace All</span>
+    <span class="fc-desc">
+      Replace every instance of a definition in one click — scoped to the current sheet
+      or the entire document. Completes as a single Undo step.
+    </span>
+  </a>
+
+  <a class="feature-card" href="#edit-attrs">
+    <span class="fc-icon">✏️</span>
+    <span class="fc-title">Edit Attributes In-Place</span>
+    <span class="fc-desc">
+      Click any symbol on the drawing to load its attribute values into the grid.
+      Edit a cell and press Enter — the symbol updates immediately.
+    </span>
+  </a>
+
+  <a class="feature-card" href="#select-similar">
+    <span class="fc-icon">⎚</span>
+    <span class="fc-title">Select Similar</span>
+    <span class="fc-desc">
+      Pick a symbol on the drawing, then highlight all instances that share
+      the same definition on the active sheet. Shows instance count in the status bar.
+    </span>
+  </a>
+
+  <a class="feature-card" href="#scan">
+    <span class="fc-icon">🔍</span>
+    <span class="fc-title">Scan Sheet</span>
+    <span class="fc-desc">
+      Highlight every symbol on the active sheet whose definition is <em>not</em> in
+      the current palette source. Useful for auditing outdated or unknown symbols.
+    </span>
+  </a>
+
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     PANEL — SOURCE
+══════════════════════════════════════════════════════════ -->
+<h2 id="source">Source</h2>
+<p>
+  The <strong>SOURCE</strong> row at the top of the palette controls where the symbol list
+  is populated from. The <span class="btn">?</span> button on the right opens this guide.
+</p>
+<table>
+  <tr><th style="width:80px">Mode</th><th>How to use</th></tr>
+  <tr>
+    <td><strong>File</strong></td>
+    <td>
+      Type or paste a full file path into the path box and press <kbd>Enter</kbd> to load.
+      Click <span class="btn">⚙</span> to open a file browser. The source must be a valid
+      Inventor Drawing (<code>.idw</code>) that contains Sketched Symbol definitions.
+    </td>
+  </tr>
+  <tr>
+    <td><strong>Local</strong></td>
+    <td>
+      Shows symbols defined inside the currently active drawing document.
+      Switch to this mode when your symbol library is embedded in the drawing itself.
+    </td>
+  </tr>
+</table>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     PANEL — SYMBOL LIST
+══════════════════════════════════════════════════════════ -->
+<h2 id="symbol-list">Symbol List</h2>
+<table>
+  <tr><th style="width:160px">Control</th><th>Action</th></tr>
+  <tr><td>Search box</td><td>Filter by name — case-insensitive substring match.</td></tr>
+  <tr><td><span class="btn">⊞</span> / <span class="btn">☰</span></td><td>Toggle Grid view (thumbnails) / List view (compact rows).</td></tr>
+  <tr><td><kbd>↑</kbd> / <kbd>↓</kbd></td><td>Navigate with arrow keys.</td></tr>
+  <tr><td>Click</td><td>Select a symbol — Properties panel updates.</td></tr>
+  <tr><td>Double-click</td><td>Select and immediately start Insert mode.</td></tr>
+  <tr><td>Right-click</td><td>Context menu → <em>Insert into Drawing</em>.</td></tr>
+</table>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     PANEL — PROPERTIES
+══════════════════════════════════════════════════════════ -->
+<h2 id="properties">Properties</h2>
+<p>
+  Shown when a symbol is selected in the palette. These values are applied on the next Insert.
+  They are also preserved or overridden during Replace (see <a href="#preserve">What Is Preserved</a>).
+</p>
+<table>
+  <tr><th style="width:150px">Field</th><th>Description</th></tr>
+  <tr><td><strong>Scale</strong></td><td>Uniform scale factor. Default: <code>1.000</code>.</td></tr>
+  <tr><td><strong>Rotate°</strong></td><td>Rotation in degrees counter-clockwise. Default: <code>0</code>.</td></tr>
+  <tr><td><strong>Static</strong></td><td>Hides scale/rotate grip handles on the symbol. Default: on.</td></tr>
+  <tr><td><strong>Clipping</strong></td><td>Trims annotations behind the symbol boundary.</td></tr>
+  <tr><td><strong>Leader</strong></td><td>Attaches a leader line when placing on a drawing edge or sketch line.</td></tr>
+  <tr><td><strong>Leader Visible</strong></td><td>Shows or hides the leader line (only relevant when Leader is on).</td></tr>
+</table>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     PANEL — ATTRIBUTES
+══════════════════════════════════════════════════════════ -->
+<h2 id="attributes">Attributes</h2>
+<p>
+  The <strong>ATTRIBUTES</strong> grid below Properties lists all prompt fields defined in the symbol.
+  The <strong>Field</strong> column is read-only; the <strong>Value</strong> column is editable.
+</p>
+<ul>
+  <li>Values entered here are applied when you <a href="#insert">Insert</a> or <a href="#replace">Replace</a>.</li>
+  <li>When you click a symbol already on the drawing, the grid loads that instance's live values for <a href="#edit-attrs">in-place editing</a>.</li>
+  <li>If the symbol definition has no prompt fields, the grid is empty — this is normal.</li>
+</ul>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     FEATURE — INSERT
+══════════════════════════════════════════════════════════ -->
+<h2 id="insert">Insert Symbol</h2>
+<ol class="steps">
+  <li><div>Select a symbol in the palette list.</div></li>
+  <li><div>Adjust <a href="#properties">Properties</a> (Scale, Rotate°, checkboxes) and fill in any <a href="#attributes">Attribute</a> values.</div></li>
+  <li>
+    <div>Start insert mode:
+      <ul>
+        <li><strong>Double-click</strong> the symbol, or</li>
+        <li><strong>Right-click → Insert into Drawing</strong>.</li>
+      </ul>
+    </div>
+  </li>
+  <li>
+    <div>Click on the drawing:
+      <ul>
+        <li>On an <strong>edge or sketch line</strong> → symbol is inserted with a leader attached.</li>
+        <li>On <strong>empty space</strong> → symbol is inserted as a floating annotation (no leader).</li>
+      </ul>
+    </div>
+  </li>
+  <li><div>The tool stays active (<em>continuous mode</em>). Place more symbols or press <kbd>Esc</kbd> to exit.</div></li>
+</ol>
+<div class="note">Each insert is a single Undo step — <kbd>Ctrl</kbd>+<kbd>Z</kbd> reverses it.</div>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     FEATURE — REPLACE SINGLE
+══════════════════════════════════════════════════════════ -->
+<h2 id="replace">Replace Symbol (Single)</h2>
+<ol class="steps">
+  <li><div>Select the <strong>new</strong> symbol definition from the palette.</div></li>
+  <li><div>(Optional) Fill in <a href="#attributes">Attribute</a> values to apply to the replacement.</div></li>
+  <li><div>Click <span class="btn btn-primary">🔄 Replace (Pick Mode)</span>. The cursor enters pick mode.</div></li>
+  <li><div>Click the existing symbol on the drawing you want to replace. It is swapped in-place.</div></li>
+</ol>
+<div class="warn">The <strong>Replace</strong> button is grey until a symbol is selected in the palette list.</div>
+<p>For details on what position, scale and attribute data is carried over, see <a href="#preserve">What Is Preserved</a>.</p>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     FEATURE — REPLACE ALL
+══════════════════════════════════════════════════════════ -->
+<h2 id="replace-all">Replace All</h2>
+<p>Replaces every instance of a given definition at once, in a single Undo step.</p>
+<ol class="steps">
+  <li><div>Select the <strong>new</strong> symbol from the palette.</div></li>
+  <li><div>(Optional) Fill in Attribute values.</div></li>
+  <li>
+    <div>Click <span class="btn">Replace All ▾</span> and choose a scope:
+      <ul>
+        <li><strong>Current Sheet Only</strong> — replaces all matching instances on the active sheet.</li>
+        <li><strong>All Sheets</strong> — replaces across the entire document (a dialog shows the sheet-by-sheet count before confirming).</li>
+      </ul>
+    </div>
+  </li>
+  <li><div>Click any instance of the old symbol on the drawing. All matching instances are replaced immediately.</div></li>
+</ol>
+<div class="tip">Replace All is one Undo step — pressing <kbd>Ctrl</kbd>+<kbd>Z</kbd> once restores all replaced instances.</div>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     FEATURE — EDIT ATTRIBUTES IN-PLACE
+══════════════════════════════════════════════════════════ -->
+<h2 id="edit-attrs">Edit Attributes In-Place</h2>
+<p>Update the text values of a symbol that is already on the drawing, without going through Replace.</p>
+<ol class="steps">
+  <li><div>Click directly on a symbol on the drawing.</div></li>
+  <li><div>The <a href="#attributes">Attributes</a> grid loads that instance's current prompt values.</div></li>
+  <li><div>Click a cell in the <strong>Value</strong> column and type a new value.</div></li>
+  <li><div>Press <kbd>Enter</kbd> or click elsewhere — the symbol updates on the drawing immediately.</div></li>
+</ol>
+<div class="note">Each cell edit is its own Undo step.</div>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     FEATURE — SCAN SHEET
+══════════════════════════════════════════════════════════ -->
+<h2 id="scan">Scan Sheet</h2>
+<p>
+  Highlights all symbols on the active sheet whose definition is <strong>not found</strong>
+  in the current palette source — useful for auditing outdated or mismatched symbols.
+</p>
+<ol class="steps">
+  <li><div>Ensure the correct <a href="#source">Source</a> is loaded.</div></li>
+  <li><div>Click <span class="btn">🔍 Scan Sheet</span>.</div></li>
+  <li>
+    <div>
+      Unrecognised symbols are highlighted on the drawing. The status bar shows a breakdown:<br>
+      <code style="display:block;margin:6px 0 2px;">5/41 NOT in palette (3 type(s)): thickness-right (3), WELD2 (1), CL DOOR (1)</code>
+    </div>
+  </li>
+  <li><div>Click <span class="btn">✖ Clear Highlight</span> when done.</div></li>
+</ol>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     FEATURE — SELECT SIMILAR
+══════════════════════════════════════════════════════════ -->
+<h2 id="select-similar">Select Similar</h2>
+<p>Find and highlight all instances of a specific symbol definition on the active sheet.</p>
+<ol class="steps">
+  <li><div>Click any symbol directly on the drawing. The <span class="btn">⎚ Select Similar</span> button enables.</div></li>
+  <li><div>Click <span class="btn">⎚ Select Similar</span>.</div></li>
+  <li><div>All symbols sharing the same definition are highlighted. The status bar shows the count, e.g. <code>3 instance(s) of "WELD2" selected</code>.</div></li>
+  <li><div>Click <span class="btn">✖ Clear Highlight</span> to deselect.</div></li>
+</ol>
+<div class="note">Select Similar operates on the <strong>active sheet only</strong>. Switch sheets and run it again to check other sheets.</div>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     REFERENCE — WHAT IS PRESERVED
+══════════════════════════════════════════════════════════ -->
+<h2 id="preserve">What Is Preserved During Replace</h2>
+<table>
+  <tr><th style="width:210px">Property</th><th>Behavior</th></tr>
+  <tr><td>Position (insert point)</td><td>Always preserved exactly.</td></tr>
+  <tr><td>Scale</td><td>Always preserved.</td></tr>
+  <tr><td>Layer</td><td>Preserved.</td></tr>
+  <tr><td>Static / Clipping / Leader Visible</td><td>Preserved from the old instance.</td></tr>
+  <tr><td>Leader (attached geometry)</td><td>Re-attached to the same drawing curve or sketch line.</td></tr>
+  <tr>
+    <td>Rotation</td>
+    <td>
+      <strong>Same definition</strong> (update): rotation is preserved.<br>
+      <strong>Different definition</strong> (cross-replace): rotation is reset to 0° to avoid the new symbol appearing flipped due to a different native orientation.
+    </td>
+  </tr>
+  <tr>
+    <td>Attribute values</td>
+    <td>Copied from the old instance where field names match. Values entered in the Attributes grid override the copied values.</td>
+  </tr>
+</table>
+
+<div class="note">
+  <strong>Why rotation resets on cross-definition replace:</strong>
+  If symbol A was rotated 180° to look correct and you replace it with symbol B, keeping 180°
+  would flip B upside-down because the two definitions have different natural orientations.
+  Adjust rotation manually with Inventor's rotate handle if needed after a cross-definition replace.
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     REFERENCE — KEYBOARD
+══════════════════════════════════════════════════════════ -->
+<h2 id="keyboard">Keyboard &amp; Mouse Reference</h2>
+<table>
+  <tr><th style="width:180px">Input</th><th>Action</th></tr>
+  <tr><td><kbd>↑</kbd> / <kbd>↓</kbd></td><td>Navigate the symbol list.</td></tr>
+  <tr><td>Double-click symbol</td><td>Start Insert mode immediately.</td></tr>
+  <tr><td>Right-click symbol</td><td>Context menu (Insert into Drawing).</td></tr>
+  <tr><td><kbd>Esc</kbd></td><td>Exit Insert or Replace pick mode.</td></tr>
+  <tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd></td><td>Undo last insert, replace or attribute edit.</td></tr>
+  <tr><td><kbd>Enter</kbd> in path box</td><td>Load the typed library file path.</td></tr>
+  <tr><td><kbd>Enter</kbd> in attribute cell</td><td>Confirm the value and update the symbol on the drawing.</td></tr>
+</table>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     TROUBLESHOOTING
+══════════════════════════════════════════════════════════ -->
+<h2 id="tips">Troubleshooting</h2>
+
+<h3>MCG TOOLS tab is not visible in the ribbon</h3>
+<ul>
+  <li>Open <em>Tools → Add-In Manager</em> and check that <strong>MCG_InventorSymbolHandler</strong> is listed and ticked as Loaded.</li>
+  <li>If the entry is missing, verify that all three files exist in <code>C:\CustomTools\Inventor\</code> and re-run <code>Install_AutoLoadInventorAddin.bat</code>, then restart Inventor.</li>
+  <li>The tab only appears in the <strong>Drawing</strong> environment — open a <code>.idw</code> file first.</li>
+</ul>
+
+<h3>Symbol list is empty after setting a File source</h3>
+<ul>
+  <li>Confirm the path in the Source box is correct (type or paste, then press <kbd>Enter</kbd>).</li>
+  <li>The file must be a valid <code>.idw</code> drawing that contains Sketched Symbol definitions.</li>
+</ul>
+
+<h3>Attributes are empty after replacing a non-attribute symbol with an attribute symbol</h3>
+<p>
+  Fill the Attributes grid <em>before</em> clicking Replace. Values you type are applied to the new symbol even when the old one had no attributes.
+</p>
+
+<h3>Symbol appears flipped or rotated incorrectly after Replace</h3>
+<p>
+  This is expected on cross-definition replaces — rotation resets to 0°.
+  See <a href="#preserve">What Is Preserved</a> for explanation.
+  Adjust manually with Inventor's rotate handle.
+</p>
+
+<h3>Replace / Replace All button stays grey</h3>
+<p>Select a symbol in the palette list first. The button enables only when a definition is selected.</p>
+
+<h3>Panel does not reopen after closing</h3>
+<p>Click <strong>MCG TOOLS → Symbol Handler</strong> in the ribbon again. The palette does not auto-restore when Inventor is restarted.</p>
+
+<footer>
+  MCG_InventorSymbolHandler v1.0.0 &nbsp;·&nbsp; Autodesk Inventor 2023 Drawing Add-In
+</footer>
+
+</main>
+</div>
+</body>
+</html>
