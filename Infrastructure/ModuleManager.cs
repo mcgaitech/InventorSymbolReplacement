@@ -45,23 +45,24 @@ namespace MCGInventorPlugin.Infrastructure
                 }
             }
 
-            if (firstTime)
+            // MCG_FIX (TASK 2): RibbonManager phải chạy MỌI Activate (kể cả
+            // firstTime=false) để re-attach OnExecute event handlers — Inventor
+            // không persist handler giữa các session. Bên trong Build, việc
+            // tạo Tab/Panel mới đã được gate bởi firstTime.
+            _ribbonManager = new MCGRibbonManager(app, addinGuid);
+            foreach (var module in _modules)
             {
-                _ribbonManager = new MCGRibbonManager(app, addinGuid);
-                foreach (var module in _modules)
+                try
                 {
-                    try
-                    {
-                        foreach (var tool in module.GetTools())
-                            _ribbonManager.RegisterTool(tool);
-                    }
-                    catch (Exception ex)
-                    {
-                        Debug.WriteLine($"{LOG_PREFIX} LỖI GetTools '{module.Name}': {ex.Message}");
-                    }
+                    foreach (var tool in module.GetTools())
+                        _ribbonManager.RegisterTool(tool);
                 }
-                _ribbonManager.Build();
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"{LOG_PREFIX} LỖI GetTools '{module.Name}': {ex.Message}");
+                }
             }
+            _ribbonManager.Build(firstTime);
 
             foreach (var module in _modules)
             {

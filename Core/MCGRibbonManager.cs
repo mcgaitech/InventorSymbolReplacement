@@ -54,41 +54,76 @@ namespace MCG.Inventor.Ribbon
         }
 
         /// <summary>
-        /// Build toàn bộ ribbon UI cho tất cả tool đã đăng ký.
-        /// Gọi 1 lần sau khi tất cả RegisterTool() đã xong.
+        /// Build ribbon UI + DockableWindow cho tất cả tool đã đăng ký.
+        ///
+        /// MCG_FIX (TASK 2): Build phải biết firstTime để gate đúng vòng đời:
+        ///   - ButtonDefinition: LUÔN tạo/lookup + re-attach OnExecute (Inventor
+        ///     không persist event handlers giữa các session).
+        ///   - RibbonTab/RibbonPanel/Button placement: CHỈ khi firstTime=true.
+        ///     Nếu firstTime=false, Inventor đã restore layout từ session cũ —
+        ///     can thiệp Add() sẽ corrupt RibbonManager nội bộ và làm các addin
+        ///     khác (Vault, Content Center) không load được UI.
+        ///   - DockableWindowHost: LUÔN create (handle cả new + restored case
+        ///     bên trong qua try-lookup-then-Add).
         /// </summary>
-        public void Build()
+        public void Build(bool firstTime)
         {
-            Debug.WriteLine($"{LOG_PREFIX} ===== Build ribbon cho {_tools.Count} tools =====");
+            Debug.WriteLine($"{LOG_PREFIX} ===== Build (firstTime={firstTime}, tools={_tools.Count}) =====");
 
-            // Bước 1: ButtonDefinitions (shared across ribbons/panels)
+            // ─ Bước 1: ButtonDefinitions — chạy MỌI lần (re-attach OnExecute) ─
             foreach (var tool in _tools)
             {
                 try { CreateButtonDefinition(tool); }
                 catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI CreateButtonDefinition {tool.Id}: {ex.Message}"); }
             }
 
-            // Bước 2: build tabs/panels/buttons trước (nếu palette lỗi vẫn thấy button)
-            var ribbons = new[] { RibbonContext.Part, RibbonContext.Assembly, RibbonContext.Drawing };
-            var panels  = new[] { PanelLocation.Model, PanelLocation.Drawing, PanelLocation.Utility };
-
-            foreach (var ribbonCtx in ribbons)
+            // ─ Bước 2: Ribbon Tab/Panel/Button — CHỈ KHI firstTime=true ─────
+            // Inventor đã serialize layout sau lần đầu; gọi RibbonTabs.Add hoặc
+            // RibbonPanels.Add ở firstTime=false sẽ làm crash addin manager.
+            if (firstTime)
             {
-                foreach (var panelLoc in panels)
+                var ribbons = new[] { RibbonContext.Part, RibbonContext.Assembly, RibbonContext.Drawing };
+                var panels  = new[] { PanelLocation.Model, PanelLocation.Drawing, PanelLocation.Utility };
+
+                foreach (var ribbonCtx in ribbons)
                 {
-                    if (!IsPanelValidForRibbon(panelLoc, ribbonCtx)) continue;
+                    foreach (var panelLoc in panels)
+                    {
+                        if (!IsPanelValidForRibbon(panelLoc, ribbonCtx)) continue;
 
-                    var matching = _tools
-                        .Where(t => t.Panel == panelLoc && t.Contexts.HasFlag(ribbonCtx))
-                        .ToList();
-                    if (matching.Count == 0) continue;
+                        var matching = _tools
+                            .Where(t => t.Panel == panelLoc && t.Contexts.HasFlag(ribbonCtx))
+                            .ToList();
+                        if (matching.Count == 0) continue;
 
-                    try { AddToolsToRibbon(ribbonCtx, panelLoc, matching); }
-                    catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI AddToolsToRibbon ribbon={ribbonCtx} panel={panelLoc}: {ex.Message}"); }
+                        try { AddToolsToRibbon(ribbonCtx, panelLoc, matching); }
+                        catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI AddToolsToRibbon ribbon={ribbonCtx} panel={panelLoc}: {ex.Message}"); }
+                    }
                 }
             }
+            else
+            {
+                Debug.WriteLine($"{LOG_PREFIX} firstTime=false → bỏ qua Ribbon Tab/Panel creation (Inventor đã có layout cached).");
+            }
 
-            // Bước 3: DockableWindowHosts (sau ribbon, tránh cascade failure)
+            // ─ Bước 3: DockableWindowHosts — LUÔN tạo (lookup hoặc Add bên trong) ─
+            //
+            // MCG_FIX (TASK 3): defer chiến lược 2 tầng:
+            //   (a) Tầng MCGRibbonManager (đây): host.Create() chạy đồng bộ
+            //       NHƯNG được bọc try/catch ngoài cùng → không exception nào
+            //       leak ra Activate (đảm bảo Vault/CC vẫn load được).
+            //   (b) Tầng DockableWindowHost: Create() đã tự defer phần WPF
+            //       embed qua retry timer 200ms (xem ScheduleEmbedRetry trong
+            //       Core/DockableWindowHost.cs) cho đến khi DockableWindow
+            //       HWND sẵn sàng. Force-hide timer 2s đầu để Inventor không
+            //       restore visibility từ session cũ.
+            //
+            // Lưu ý: KHÔNG dời sang ApplicationEvents.OnReady vì:
+            //   - Inventor 2023 SDK không expose canonical OnReady event
+            //   - SymbolHandlerModule.OnUIReady() phụ thuộc đồng bộ vào
+            //     CreatedPanel (set bởi host.Create) — defer sẽ phá wiring
+            //   - Retry timer trong DockableWindowHost đã handle race với
+            //     Inventor MainWindow chưa sẵn sàng (HWND=0 → retry).
             foreach (var tool in _tools)
             {
                 if (tool.DockablePanel == null) continue;
@@ -102,12 +137,14 @@ namespace MCG.Inventor.Ribbon
                 }
                 catch (Exception ex)
                 {
+                    // Tuyệt đối không để exception propagate — DockableWindow lỗi
+                    // KHÔNG được phá hỏng việc load các addin khác.
                     Debug.WriteLine($"{LOG_PREFIX} LỖI DockableWindowHost {tool.Id}: {ex.Message}");
                     Debug.WriteLine($"{LOG_PREFIX} Stack:\n{ex.StackTrace}");
                 }
             }
 
-            Debug.WriteLine($"{LOG_PREFIX} ===== Build ribbon HOÀN TẤT =====");
+            Debug.WriteLine($"{LOG_PREFIX} ===== Build HOÀN TẤT (firstTime={firstTime}) =====");
         }
 
         /// <summary>Cleanup — gọi từ addin Deactivate().</summary>

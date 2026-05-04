@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Inventor;
 using MCGInventorPlugin.Infrastructure;
@@ -13,13 +14,13 @@ namespace MCGInventorPlugin
     /// Inventor tìm class này qua COM GUID trong file .addin.
     /// Tất cả modules được đăng ký tại đây — ModuleManager quản lý lifecycle.
     /// </summary>
-    [Guid("7C3D8E4F-2A1B-4C5D-9E8F-1A2B3C4D5E6F")]
+    [Guid("C331C6DF-8DEA-40DA-9DEA-4B3E5AEB5C0F")]
     [ClassInterface(ClassInterfaceType.None)]
     [ComVisible(true)]
     public class MCGInventorPluginAddin : ApplicationAddInServer
     {
         private const string LOG_PREFIX  = "[MCGInventorPlugin]";
-        internal const string ADDIN_GUID = "{7C3D8E4F-2A1B-4C5D-9E8F-1A2B3C4D5E6F}";
+        internal const string ADDIN_GUID = "{C331C6DF-8DEA-40DA-9DEA-4B3E5AEB5C0F}";
 
         // MCG_FIX: file log để debug khi Inventor ẩn console — bất kỳ exception nào
         // thoát khỏi Activate/Deactivate có thể làm Inventor lỡ load Vault/ContentCenter,
@@ -30,59 +31,73 @@ namespace MCGInventorPlugin
         private Inventor.Application _app;
         private ModuleManager _moduleManager;
 
+        // ─── ENTRY POINT ──────────────────────────────────────────────────────
+        // MCG_FIX (TASK 1): Activate chỉ làm 2 việc — gọi ActivateInternal trong
+        // try/catch + log. Toàn bộ logic instantiate object (new ModuleManager,
+        // new SymbolHandlerModule, ...) nằm trong ActivateInternal.
+        // Lý do: JIT compile method body LẦN ĐẦU khi method được gọi. Nếu thiếu
+        // DLL phụ thuộc, JIT exception sẽ văng ra TRƯỚC KHI thân method được
+        // chạy — nghĩa là TRƯỚC try/catch ở cùng method. Bằng cách tách sang
+        // method khác + [MethodImpl(NoInlining)], lỗi JIT của ActivateInternal
+        // sẽ propagate UP vào try/catch của Activate, không thoát ra Inventor.
         public void Activate(ApplicationAddInSite addInSiteObject, bool firstTime)
         {
             Debug.WriteLine($"{LOG_PREFIX} ===== Bắt đầu kích hoạt addin =====");
             Debug.WriteLine($"{LOG_PREFIX} firstTime = {firstTime}");
-            // MCG_FIX: log INFO để biết Activate có được gọi không (kể cả khi không có exception)
             LogInfo($"===== Activate START (firstTime={firstTime}) =====");
 
             try
             {
-                _app = addInSiteObject.Application;
-                Debug.WriteLine($"{LOG_PREFIX} Inventor version: {_app.SoftwareVersion.DisplayVersion}");
-                LogInfo($"Inventor version: {_app.SoftwareVersion.DisplayVersion}");
-
-                _moduleManager = new ModuleManager();
-                _moduleManager.Register(new SymbolHandlerModule());
-                // Tương lai: đăng ký modules khác
-                // _moduleManager.Register(new PartToolsModule());
-                // _moduleManager.Register(new AssemblyToolsModule());
-                // _moduleManager.Register(new UtilityToolsModule());
-                LogInfo("Modules registered: SymbolHandler");
-
-                _moduleManager.ActivateAll(_app, ADDIN_GUID, firstTime);
-                LogInfo("ActivateAll completed");
-
+                ActivateInternal(addInSiteObject, firstTime);
                 Debug.WriteLine($"{LOG_PREFIX} ===== Addin kích hoạt THÀNH CÔNG =====");
-                LogInfo("===== Activate SUCCESS =====");
+                // MCG_FIX: Activate thành công → log file không còn cần thiết.
+                // Quy ước mới: file log CHỈ tồn tại khi có lỗi. User mở thư mục
+                // logs → file có nghĩa là addin gặp vấn đề → mở để xem chi tiết.
+                DeleteLogFile();
             }
             catch (Exception ex)
             {
-                // MCG_FIX: KHÔNG re-throw — exception thoát khỏi Activate có thể
-                // ngăn Inventor load các addin khác (Vault, Content Centre).
+                // KHÔNG re-throw — exception thoát khỏi Activate có thể ngăn
+                // Inventor load các addin khác (Vault, Content Centre).
                 Debug.WriteLine($"{LOG_PREFIX} LỖI NGHIÊM TRỌNG: {ex.Message}");
                 Debug.WriteLine($"{LOG_PREFIX} Stack trace:\n{ex.StackTrace}");
                 LogToFile("Activate", ex);
             }
         }
 
+        // MCG_FIX (TASK 1): NoInlining bắt buộc — nếu JIT inline lại vào
+        // Activate() thì pattern try/catch-around-call mất tác dụng.
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private void ActivateInternal(ApplicationAddInSite addInSiteObject, bool firstTime)
+        {
+            _app = addInSiteObject.Application;
+            Debug.WriteLine($"{LOG_PREFIX} Inventor version: {_app.SoftwareVersion.DisplayVersion}");
+            LogInfo($"Inventor version: {_app.SoftwareVersion.DisplayVersion}");
+
+            _moduleManager = new ModuleManager();
+            _moduleManager.Register(new SymbolHandlerModule());
+            // Tương lai: đăng ký modules khác
+            // _moduleManager.Register(new PartToolsModule());
+            // _moduleManager.Register(new AssemblyToolsModule());
+            // _moduleManager.Register(new UtilityToolsModule());
+            LogInfo("Modules registered: SymbolHandler");
+
+            _moduleManager.ActivateAll(_app, ADDIN_GUID, firstTime);
+            LogInfo("ActivateAll completed");
+        }
+
         public void Deactivate()
         {
             Debug.WriteLine($"{LOG_PREFIX} ===== Bắt đầu tắt addin =====");
-            LogInfo("===== Deactivate START =====");
 
-            // MCG_FIX: top-level try/catch bao trọn body Deactivate để bảo đảm
-            // không có exception nào thoát ra Inventor (gây disable Vault/CC).
+            // MCG_FIX: Không còn ghi LogInfo trong Deactivate — nếu Activate
+            // đã thành công và xoá log, ghi INFO ở Deactivate sẽ tái tạo file
+            // → phá quy ước "log file chỉ tồn tại khi có lỗi". Vẫn ghi nếu có
+            // exception thoát ra.
             try
             {
-                try { _moduleManager?.CleanupAll(); }
-                catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI CleanupAll: {ex.Message}"); }
-
-                _app = null;
-
+                DeactivateInternal();
                 Debug.WriteLine($"{LOG_PREFIX} ===== Addin tắt THÀNH CÔNG =====");
-                LogInfo("===== Deactivate SUCCESS =====");
             }
             catch (Exception ex)
             {
@@ -90,6 +105,18 @@ namespace MCGInventorPlugin
                 Debug.WriteLine($"{LOG_PREFIX} Stack trace:\n{ex.StackTrace}");
                 LogToFile("Deactivate", ex);
             }
+        }
+
+        // MCG_FIX (TASK 1): tách body Deactivate sang method NoInlining để
+        // bảo vệ khỏi JIT compile errors (đối xứng với ActivateInternal).
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private void DeactivateInternal()
+        {
+            try { _moduleManager?.CleanupAll(); }
+            catch (Exception ex) { Debug.WriteLine($"{LOG_PREFIX} LỖI CleanupAll: {ex.Message}"); }
+
+            _moduleManager = null;
+            _app = null;
         }
 
         public void ExecuteCommand(int commandID)
@@ -116,11 +143,12 @@ namespace MCGInventorPlugin
             catch { /* nuốt lỗi I/O — không bao giờ throw từ logger */ }
         }
 
-        // MCG_FIX: log INFO (success path) — để xác nhận addin có chạy + đến đâu.
-        // Tạo file log ngay cả khi không có exception, giúp phân biệt:
-        //   (a) addin không được load   → log file không tồn tại
-        //   (b) addin load nhưng đứng giữa chừng → log có 1 phần
-        //   (c) addin load thành công   → log có dòng "===== Activate SUCCESS ====="
+        // MCG_FIX: log INFO (interim progress trong ActivateInternal).
+        // Quy ước: file được giữ lại CHỈ khi Activate thất bại — DeleteLogFile()
+        // ở cuối success path sẽ xoá file (kể cả các INFO đã ghi). Vì vậy:
+        //   (a) Activate succeed → file không tồn tại
+        //   (b) Activate dừng giữa chừng → file có INFO entries cho đến điểm dừng
+        //   (c) Activate throw → file có INFO + ERROR + stack trace
         private static void LogInfo(string message)
         {
             try
@@ -131,6 +159,17 @@ namespace MCGInventorPlugin
                     $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] INFO: {message}{nl}");
             }
             catch { /* nuốt lỗi I/O */ }
+        }
+
+        // MCG_FIX: gọi sau khi Activate thành công — file log chỉ còn lại nếu lỗi.
+        private static void DeleteLogFile()
+        {
+            try
+            {
+                if (System.IO.File.Exists(LOG_FILE))
+                    System.IO.File.Delete(LOG_FILE);
+            }
+            catch { /* nuốt lỗi I/O — file đang bị lock cũng không sao */ }
         }
     }
 }
